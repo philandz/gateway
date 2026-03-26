@@ -12,6 +12,18 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Checkout protobuf repo
+        uses: actions/checkout@v4
+        with:
+          repository: philandz/protobuf
+          path: protobuf
+
+      - name: Checkout libs repo
+        uses: actions/checkout@v4
+        with:
+          repository: philandz/libs
+          path: libs
+
       - name: Install protoc
         run: |
           sudo apt-get update

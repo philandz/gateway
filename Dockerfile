@@ -10,6 +10,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY Cargo.toml Cargo.lock ./
 COPY build.rs ./
 COPY src ./src
+COPY protobuf ./protobuf
+COPY libs ./libs
 
 RUN cargo build --release
 

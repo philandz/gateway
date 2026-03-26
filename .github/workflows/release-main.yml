@@ -17,6 +17,18 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Checkout protobuf repo
+        uses: actions/checkout@v4
+        with:
+          repository: philandz/protobuf
+          path: protobuf
+
+      - name: Checkout libs repo
+        uses: actions/checkout@v4
+        with:
+          repository: philandz/libs
+          path: libs
+
       - name: Validate semantic commit messages
         run: |
           set -euo pipefail
