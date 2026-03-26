@@ -16,6 +16,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: philandz/protobuf
+          ref: develop
           path: protobuf
           token: ${{ secrets.GH_REPO_PAT }}
 
@@ -23,6 +24,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: philandz/libs
+          ref: develop
           path: libs
           token: ${{ secrets.GH_REPO_PAT }}
 
