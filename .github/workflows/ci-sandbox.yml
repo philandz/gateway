@@ -17,12 +17,14 @@ jobs:
         with:
           repository: philandz/protobuf
           path: protobuf
+          token: ${{ secrets.CROSS_REPO_READ_PAT }}
 
       - name: Checkout libs repo
         uses: actions/checkout@v4
         with:
           repository: philandz/libs
           path: libs
+          token: ${{ secrets.CROSS_REPO_READ_PAT }}
 
       - name: Install protoc
         run: |
