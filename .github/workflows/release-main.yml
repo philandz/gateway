@@ -122,22 +122,22 @@ jobs:
           git checkout main
 
           python3 - <<'PY'
-import re
-from pathlib import Path
+          import re
+          from pathlib import Path
 
-path = Path("deploy/gateway/deployment.yaml")
-text = path.read_text(encoding="utf-8")
-version = "${{ steps.version.outputs.version }}"
-new = re.sub(
-    r"(^\s*image:\s*harbor\.philand\.io\.vn/philand/gateway:)([^\s]+)",
-    r"\g<1>" + version,
-    text,
-    flags=re.MULTILINE,
-)
-if new == text:
-    raise SystemExit("gateway image line not found in deploy manifest")
-path.write_text(new, encoding="utf-8")
-PY
+          path = Path("deploy/gateway/deployment.yaml")
+          text = path.read_text(encoding="utf-8")
+          version = "${{ steps.version.outputs.version }}"
+          new = re.sub(
+              r"(^\s*image:\s*harbor\.philand\.io\.vn/philand/gateway:)([^\s]+)",
+              r"\g<1>" + version,
+              text,
+              flags=re.MULTILINE,
+          )
+          if new == text:
+              raise SystemExit("gateway image line not found in deploy manifest")
+          path.write_text(new, encoding="utf-8")
+          PY
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
