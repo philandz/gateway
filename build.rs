@@ -8,7 +8,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             (".", "protobuf", "libs")
         };
 
-    let files = vec![
+    let files = [
         format!("{proto_prefix}/identity/identity.proto"),
         format!("{proto_prefix}/shared/user/user.proto"),
         format!("{proto_prefix}/shared/organization/organization.proto"),
