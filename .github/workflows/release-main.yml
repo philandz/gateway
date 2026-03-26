@@ -22,14 +22,14 @@ jobs:
         with:
           repository: philandz/protobuf
           path: protobuf
-          token: ${{ secrets.CROSS_REPO_READ_PAT }}
+          token: ${{ secrets.GH_REPO_PAT }}
 
       - name: Checkout libs repo
         uses: actions/checkout@v4
         with:
           repository: philandz/libs
           path: libs
-          token: ${{ secrets.CROSS_REPO_READ_PAT }}
+          token: ${{ secrets.GH_REPO_PAT }}
 
       - name: Validate semantic commit messages
         run: |
@@ -127,11 +127,11 @@ jobs:
 
       - name: Update infra deploy manifest
         env:
-          INFRA_GITOPS_PAT: ${{ secrets.INFRA_GITOPS_PAT }}
+          GH_REPO_PAT: ${{ secrets.GH_REPO_PAT }}
         run: |
           set -euo pipefail
           tmp_dir="$(mktemp -d)"
-          git clone "https://${INFRA_GITOPS_PAT}@github.com/philandz/infra.git" "$tmp_dir/infra"
+          git clone "https://${GH_REPO_PAT}@github.com/philandz/infra.git" "$tmp_dir/infra"
           cd "$tmp_dir/infra"
           git checkout main
 
