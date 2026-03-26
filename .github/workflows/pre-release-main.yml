@@ -1,12 +1,12 @@
-name: gateway-ci-sandbox
+name: gateway-pre-release-main
 
 on:
   pull_request:
     branches:
-      - sandbox
+      - main
 
 jobs:
-  test:
+  check:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
