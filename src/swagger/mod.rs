@@ -42,12 +42,8 @@ async fn identity_openapi_spec(State(state): State<Arc<AppState>>) -> Json<Value
     }
 
     let live_url = format!("{}/api-docs/openapi.json", state.identity_url);
-    if let Ok(resp) = state.client.get(&live_url).send().await {
-        if resp.status().is_success() {
-            if let Ok(spec) = resp.json::<Value>().await {
-                return Json(with_gateway_server(spec));
-            }
-        }
+    if let Ok(spec) = philand_http::get_json::<Value>(&state.client, &live_url).await {
+        return Json(with_gateway_server(spec));
     }
 
     if let Some(spec) = read_static_identity_spec() {
