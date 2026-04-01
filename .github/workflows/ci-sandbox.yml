@@ -28,6 +28,11 @@ jobs:
           path: libs
           token: ${{ secrets.GH_REPO_PAT }}
 
+      - name: Link shared repos for path dependencies
+        run: |
+          ln -sfn "$GITHUB_WORKSPACE/libs" "$GITHUB_WORKSPACE/../libs"
+          ln -sfn "$GITHUB_WORKSPACE/protobuf" "$GITHUB_WORKSPACE/../protobuf"
+
       - name: Install protoc
         run: |
           sudo apt-get update
