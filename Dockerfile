@@ -13,6 +13,8 @@ COPY src ./src
 COPY protobuf ./protobuf
 COPY libs ./libs
 
+RUN ln -sfn /app/libs /libs && ln -sfn /app/protobuf /protobuf
+
 RUN cargo build --release
 
 FROM debian:bookworm-slim
