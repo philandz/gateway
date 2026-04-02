@@ -52,7 +52,7 @@ jobs:
             if [[ "$subject" =~ ^Merge\  ]]; then
               continue
             fi
-            if ! [[ "$subject" =~ ^(feat|fix|docs|style|refactor|test|chore)(\([^\)]+\))?!?:\ .+ ]]; then
+            if ! [[ "$subject" =~ ^(feat|fix|docs|style|refactor|test|chore|ci)(\([^\)]+\))?!?:\ .+ ]]; then
               echo "Invalid commit message: $subject"
               invalid=1
             fi
