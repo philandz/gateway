@@ -8,6 +8,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             (".", "protobuf", "libs")
         };
 
+    let mut includes = vec![proto_root.to_string()];
+    for candidate in [
+        "/usr/include",
+        "/usr/local/include",
+        "/opt/homebrew/include",
+    ] {
+        if Path::new(candidate).exists() {
+            includes.push(candidate.to_string());
+        }
+    }
+
+    if let Ok(extra_include) = std::env::var("PROTOC_INCLUDE") {
+        if !extra_include.is_empty() && Path::new(&extra_include).exists() {
+            includes.push(extra_include);
+        }
+    }
+
+    let include_refs: Vec<&str> = includes.iter().map(String::as_str).collect();
+
     let files = [
         format!("{proto_prefix}/identity/identity.proto"),
         format!("{proto_prefix}/shared/user/user.proto"),
@@ -18,6 +37,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     tonic_build::configure()
         .build_server(false)
-        .compile_protos(&file_refs, &[proto_root])?;
+        .compile_protos(&file_refs, &include_refs)?;
     Ok(())
 }

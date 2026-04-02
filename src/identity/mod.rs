@@ -14,6 +14,7 @@ use crate::pb::service::identity::identity_service_client::IdentityServiceClient
 use crate::pb::shared::organization::MemberStatus;
 use crate::pb::shared::organization::OrgRole;
 use crate::AppState;
+use philand_error::ErrorEnvelope as ErrorResponse;
 
 type ApiResult<T> = Result<T, (StatusCode, Json<ErrorResponse>)>;
 
@@ -60,31 +61,9 @@ async fn health(State(state): State<Arc<AppState>>) -> ApiResult<&'static str> {
     }
 }
 
-#[derive(Serialize)]
-struct ErrorResponse {
-    code: String,
-    message: String,
-    details: Vec<String>,
-}
-
 fn map_status(status: Status) -> (StatusCode, Json<ErrorResponse>) {
-    let http = match status.code() {
-        tonic::Code::InvalidArgument => StatusCode::BAD_REQUEST,
-        tonic::Code::Unauthenticated => StatusCode::UNAUTHORIZED,
-        tonic::Code::PermissionDenied => StatusCode::FORBIDDEN,
-        tonic::Code::NotFound => StatusCode::NOT_FOUND,
-        tonic::Code::AlreadyExists => StatusCode::CONFLICT,
-        tonic::Code::FailedPrecondition => StatusCode::PRECONDITION_FAILED,
-        _ => StatusCode::INTERNAL_SERVER_ERROR,
-    };
-    (
-        http,
-        Json(ErrorResponse {
-            code: format!("{:?}", status.code()),
-            message: status.message().to_string(),
-            details: vec![],
-        }),
-    )
+    let (http, envelope) = philand_error::http_error_from_tonic_status(&status);
+    (http, Json(envelope))
 }
 
 async fn client(state: &AppState) -> ApiResult<IdentityServiceClient<Channel>> {

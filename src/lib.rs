@@ -33,9 +33,15 @@ pub enum IdentityTransport {
 
 impl IdentityTransport {
     pub fn from_env(value: &str) -> Self {
+        philand_configs::IdentityTransportMode::from_env_value(value).into()
+    }
+}
+
+impl From<philand_configs::IdentityTransportMode> for IdentityTransport {
+    fn from(value: philand_configs::IdentityTransportMode) -> Self {
         match value {
-            "grpc_transcode" => Self::GrpcTranscode,
-            _ => Self::ProxyHttp,
+            philand_configs::IdentityTransportMode::ProxyHttp => Self::ProxyHttp,
+            philand_configs::IdentityTransportMode::GrpcTranscode => Self::GrpcTranscode,
         }
     }
 }
