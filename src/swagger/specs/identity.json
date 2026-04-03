@@ -1,0 +1,36 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Philand Identity Service",
+    "version": "0.1.0",
+    "description": "Identity API contract generated from protobuf annotations."
+  },
+  "paths": {
+    "/register": { "post": { "summary": "Register" } },
+    "/login": { "post": { "summary": "Login" } },
+    "/logout": { "post": { "summary": "Logout" } },
+    "/refresh": { "post": { "summary": "Refresh token" } },
+    "/update": { "post": { "summary": "Change password" } },
+    "/forgot": { "post": { "summary": "Forgot password" } },
+    "/reset": { "post": { "summary": "Reset password" } },
+    "/profile": { "get": { "summary": "Get profile" } },
+    "/organizations": { "get": { "summary": "List organizations" } },
+    "/organizations/{org_id}/members": { "get": { "summary": "List org members" } },
+    "/organizations/{org_id}/invitations": { "post": { "summary": "Invite member" } },
+    "/invitations/{token}/accept": { "post": { "summary": "Accept invitation" } },
+    "/organizations/{org_id}/members/{user_id}/role": { "patch": { "summary": "Change member role" } },
+    "/organizations/{org_id}/members/{user_id}": { "delete": { "summary": "Remove member" } }
+  },
+  "components": {
+    "schemas": {},
+    "securitySchemes": {
+      "bearer_auth": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    }
+  },
+  "servers": [
+    { "url": "/api/identity" }
+  ]
+}
