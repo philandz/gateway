@@ -157,14 +157,17 @@ jobs:
           path = Path("deploy/gateway/deployment.yaml")
           text = path.read_text(encoding="utf-8")
           version = "${{ steps.version.outputs.version }}"
+          pattern = r"(^\s*image:\s*harbor\.philand\.io\.vn/philand/gateway:)([^\s]+)"
+          matched = re.search(pattern, text, flags=re.MULTILINE)
+          if not matched:
+              raise SystemExit("gateway image line not found in deploy manifest")
+
           new = re.sub(
-              r"(^\s*image:\s*harbor\.philand\.io\.vn/philand/gateway:)([^\s]+)",
+              pattern,
               r"\g<1>" + version,
               text,
               flags=re.MULTILINE,
           )
-          if new == text:
-              raise SystemExit("gateway image line not found in deploy manifest")
           path.write_text(new, encoding="utf-8")
           PY
 
