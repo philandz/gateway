@@ -1,0 +1,54 @@
+name: gateway-pre-release-main
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Checkout protobuf repo
+        uses: actions/checkout@v4
+        with:
+          repository: philandz/protobuf
+          ref: ${{ github.base_ref }}
+          path: protobuf
+          token: ${{ secrets.GH_REPO_PAT }}
+
+      - name: Checkout libs repo
+        uses: actions/checkout@v4
+        with:
+          repository: philandz/libs
+          ref: ${{ github.base_ref }}
+          path: libs
+          token: ${{ secrets.GH_REPO_PAT }}
+
+      - name: Link shared repos for path dependencies
+        run: |
+          ln -sfn "$GITHUB_WORKSPACE/libs" "$GITHUB_WORKSPACE/../libs"
+          ln -sfn "$GITHUB_WORKSPACE/protobuf" "$GITHUB_WORKSPACE/../protobuf"
+
+      - name: Install protoc
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y protobuf-compiler libprotobuf-dev
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Format check
+        run: cargo fmt --check
+
+      - name: Clippy
+        run: cargo clippy -- -D warnings
+
+      - name: Test
+        run: cargo test
