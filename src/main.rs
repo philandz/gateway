@@ -22,11 +22,13 @@ async fn main() -> anyhow::Result<()> {
         .map_err(|e| anyhow::anyhow!("Failed to load config: {e}"))?;
     let identity_transport: IdentityTransport = config.identity_transport.into();
 
+    let media_url = env::var("MEDIA_URL").unwrap_or_else(|_| "http://127.0.0.1:3002".to_string());
+
     let state = Arc::new(AppState {
         client: Client::new(),
         monolith_url: config.upstream_url,
         identity_url: config.identity_url,
-        media_url: config.media_url,
+        media_url,
         identity_grpc_url: config.identity_grpc_url,
         identity_transport,
     });
