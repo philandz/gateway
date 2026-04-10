@@ -56,6 +56,7 @@ async fn spawn_proxy(monolith_addr: SocketAddr) -> SocketAddr {
         client: Client::new(),
         monolith_url: format!("http://{}", monolith_addr),
         identity_url: "http://127.0.0.1:1".to_string(), // unused in monolith tests
+        media_url: "http://127.0.0.1:1".to_string(),
         identity_grpc_url: "http://127.0.0.1:1".to_string(),
         identity_transport: IdentityTransport::ProxyHttp,
     });
@@ -171,6 +172,7 @@ async fn test_proxy_returns_bad_gateway_on_unreachable_upstream() {
         client: Client::new(),
         monolith_url: "http://127.0.0.1:1".to_string(),
         identity_url: "http://127.0.0.1:1".to_string(),
+        media_url: "http://127.0.0.1:1".to_string(),
         identity_grpc_url: "http://127.0.0.1:1".to_string(),
         identity_transport: IdentityTransport::ProxyHttp,
     });
