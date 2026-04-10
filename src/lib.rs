@@ -52,6 +52,8 @@ pub struct AppState {
     pub monolith_url: String,
     /// Base URL for identity HTTP transport (used in `proxy_http` fallback mode).
     pub identity_url: String,
+    /// Base URL for media HTTP transport (HTTP proxy mode).
+    pub media_url: String,
     /// Identity service gRPC endpoint URL (e.g., "http://127.0.0.1:50051")
     pub identity_grpc_url: String,
     pub identity_transport: IdentityTransport,

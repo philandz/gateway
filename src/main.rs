@@ -1,4 +1,4 @@
-use axum::{routing::get, Router};
+use axum::{http::StatusCode, middleware, routing::get, Router};
 use reqwest::Client;
 use std::{env, net::SocketAddr, sync::Arc};
 use tower_http::cors::{Any, CorsLayer};
@@ -22,10 +22,13 @@ async fn main() -> anyhow::Result<()> {
         .map_err(|e| anyhow::anyhow!("Failed to load config: {e}"))?;
     let identity_transport: IdentityTransport = config.identity_transport.into();
 
+    let media_url = env::var("MEDIA_URL").unwrap_or_else(|_| "http://127.0.0.1:3002".to_string());
+
     let state = Arc::new(AppState {
         client: Client::new(),
         monolith_url: config.upstream_url,
         identity_url: config.identity_url,
+        media_url,
         identity_grpc_url: config.identity_grpc_url,
         identity_transport,
     });
@@ -44,10 +47,17 @@ async fn main() -> anyhow::Result<()> {
             .merge(gateway::proxy::router()),
     };
 
+    let is_local_docs = is_localhost_binding(&config.host);
+    let swagger_router = if is_local_docs {
+        gateway::swagger::router()
+    } else {
+        gateway::swagger::router().layer(middleware::from_fn(swagger_local_only))
+    };
+
     let app = Router::new()
         .route("/health", get(|| async { "OK" }))
         .nest("/api", api_router)
-        .merge(gateway::swagger::router())
+        .merge(swagger_router)
         .layer(TraceLayer::new_for_http())
         .layer(cors)
         .layer(PropagateRequestIdLayer::new(x_request_id.clone()))
@@ -61,4 +71,19 @@ async fn main() -> anyhow::Result<()> {
     axum::serve(listener, app).await?;
 
     Ok(())
+}
+
+fn is_localhost_binding(host: &str) -> bool {
+    matches!(host, "127.0.0.1" | "localhost" | "::1")
+}
+
+async fn swagger_local_only(
+    request: axum::extract::Request,
+    next: middleware::Next,
+) -> Result<axum::response::Response, StatusCode> {
+    let path = request.uri().path();
+    if path == "/swagger" || path == "/swagger/" || path.starts_with("/swagger/") {
+        return Err(StatusCode::NOT_FOUND);
+    }
+    Ok(next.run(request).await)
 }

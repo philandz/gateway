@@ -34,8 +34,14 @@ Required env:
 Optional env:
 
 - `IDENTITY_URL`
+- `MEDIA_URL`
 - `IDENTITY_TRANSPORT`
 - `HOST`, `PORT`
+
+Routing notes:
+
+- `/api/identity/*` -> identity service (proxy or gRPC-transcoded mode)
+- `/api/media/*` -> media service HTTP adapter (`MEDIA_URL`)
 
 See `../libs/configs/README.md` for full config contract.
 

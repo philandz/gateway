@@ -14,12 +14,15 @@ use crate::AppState;
 pub fn router_with_identity() -> Router<Arc<AppState>> {
     Router::new()
         .route("/identity/{*path}", any(identity_proxy_handler))
+        .route("/media/{*path}", any(media_proxy_handler))
         .route("/{*path}", any(monolith_proxy_handler))
 }
 
 /// Creates the fallback proxy router for monolith-only paths.
 pub fn router() -> Router<Arc<AppState>> {
-    Router::new().route("/{*path}", any(monolith_proxy_handler))
+    Router::new()
+        .route("/media/{*path}", any(media_proxy_handler))
+        .route("/{*path}", any(monolith_proxy_handler))
 }
 
 async fn identity_proxy_handler(
@@ -34,6 +37,22 @@ async fn identity_proxy_handler(
         .map(|q| format!("?{}", q))
         .unwrap_or_default();
     let uri = format!("{}{}{}", state.identity_url, downstream_path, query);
+
+    forward_request(&state, req, &uri).await
+}
+
+async fn media_proxy_handler(
+    State(state): State<Arc<AppState>>,
+    req: Request,
+) -> Result<Response, StatusCode> {
+    let path = req.uri().path();
+    let downstream_path = path.strip_prefix("/media").unwrap_or(path);
+    let query = req
+        .uri()
+        .query()
+        .map(|q| format!("?{}", q))
+        .unwrap_or_default();
+    let uri = format!("{}{}{}", state.media_url, downstream_path, query);
 
     forward_request(&state, req, &uri).await
 }
