@@ -1,0 +1,498 @@
+{
+  "swagger": "2.0",
+  "info": {
+    "title": "media.proto",
+    "version": "version not set"
+  },
+  "tags": [
+    {
+      "name": "MediaService"
+    }
+  ],
+  "consumes": [
+    "application/json"
+  ],
+  "produces": [
+    "application/json"
+  ],
+  "paths": {
+    "/files": {
+      "get": {
+        "summary": "ListFiles returns all confirmed files owned by the caller,\noptionally scoped to an org_id.",
+        "operationId": "MediaService_ListFiles",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/mediaListFilesResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "orgId",
+            "description": "Optional: filter by org_id.",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "limit",
+            "description": "Pagination: max items to return (0 = server default).",
+            "in": "query",
+            "required": false,
+            "type": "integer",
+            "format": "int32"
+          },
+          {
+            "name": "offset",
+            "description": "Pagination: offset.",
+            "in": "query",
+            "required": false,
+            "type": "integer",
+            "format": "int32"
+          }
+        ],
+        "tags": [
+          "MediaService"
+        ]
+      }
+    },
+    "/files/{fileId}": {
+      "get": {
+        "summary": "GetFile returns metadata for a confirmed file owned by the caller.",
+        "operationId": "MediaService_GetFile",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/mediaGetFileResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "fileId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "MediaService"
+        ]
+      },
+      "delete": {
+        "summary": "DeleteFile soft-deletes a file record (sets status = deleted).\nThe caller must own the file.",
+        "operationId": "MediaService_DeleteFile",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/mediaDeleteFileResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "fileId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "MediaService"
+        ]
+      }
+    },
+    "/files/{fileId}/download-url": {
+      "get": {
+        "summary": "GetFileDownloadUrl returns a short-lived presigned GET URL for a private file.",
+        "operationId": "MediaService_GetFileDownloadUrl",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/mediaGetFileDownloadUrlResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "fileId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "MediaService"
+        ]
+      }
+    },
+    "/uploads/complete": {
+      "post": {
+        "summary": "CompleteUpload verifies the uploaded object and marks the session ready.\nMust be called after the client has finished the PUT to S3.",
+        "operationId": "MediaService_CompleteUpload",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/mediaCompleteUploadResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/mediaCompleteUploadRequest"
+            }
+          }
+        ],
+        "tags": [
+          "MediaService"
+        ]
+      }
+    },
+    "/uploads/init": {
+      "post": {
+        "summary": "InitUpload creates an upload session and returns a presigned PUT URL.\nThe client must PUT the file directly to S3 using the returned URL.",
+        "operationId": "MediaService_InitUpload",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/mediaInitUploadResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/mediaInitUploadRequest"
+            }
+          }
+        ],
+        "tags": [
+          "MediaService"
+        ]
+      }
+    }
+  },
+  "definitions": {
+    "baseBase": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "int64"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "int64"
+        },
+        "deletedAt": {
+          "type": "string",
+          "format": "int64"
+        },
+        "createdBy": {
+          "type": "string"
+        },
+        "updatedBy": {
+          "type": "string"
+        },
+        "ownerId": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/definitions/baseBaseStatus"
+        }
+      }
+    },
+    "baseBaseStatus": {
+      "type": "string",
+      "enum": [
+        "BS_NONE",
+        "BS_ACTIVE",
+        "BS_INACTIVE",
+        "BS_PENDING",
+        "BS_DELETED",
+        "BS_ARCHIVED",
+        "BS_BLOCKED",
+        "BS_UNKNOWN",
+        "BS_DISABLED",
+        "BS_INVITED"
+      ],
+      "default": "BS_NONE"
+    },
+    "mediaCompleteUploadRequest": {
+      "type": "object",
+      "properties": {
+        "uploadId": {
+          "type": "string"
+        }
+      }
+    },
+    "mediaCompleteUploadResponse": {
+      "type": "object",
+      "properties": {
+        "fileId": {
+          "type": "string"
+        },
+        "bucket": {
+          "type": "string"
+        },
+        "objectKey": {
+          "type": "string"
+        },
+        "uploadStatus": {
+          "$ref": "#/definitions/mediaMediaUploadStatus"
+        },
+        "etag": {
+          "type": "string",
+          "description": "etag returned by S3 HEAD after verification."
+        },
+        "confirmedSize": {
+          "type": "string",
+          "format": "int64",
+          "description": "Actual byte size confirmed by S3 HEAD."
+        },
+        "publicUrl": {
+          "type": "string",
+          "title": "Public URL for accessing the file directly (only valid if bucket is public-read).\nFormat: {S3_PUBLIC_BASE_URL}/{bucket}/{object_key}"
+        }
+      }
+    },
+    "mediaDeleteFileResponse": {
+      "type": "object"
+    },
+    "mediaGetFileDownloadUrlResponse": {
+      "type": "object",
+      "properties": {
+        "fileId": {
+          "type": "string"
+        },
+        "downloadUrl": {
+          "type": "string",
+          "description": "Short-lived presigned GET URL for the private S3 object."
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "int64",
+          "description": "Unix timestamp when the URL expires."
+        }
+      }
+    },
+    "mediaGetFileResponse": {
+      "type": "object",
+      "properties": {
+        "file": {
+          "$ref": "#/definitions/mediaMediaFile"
+        }
+      }
+    },
+    "mediaInitUploadRequest": {
+      "type": "object",
+      "properties": {
+        "fileName": {
+          "type": "string",
+          "description": "Original file name (max 255 chars, must not be empty)."
+        },
+        "contentType": {
+          "type": "string",
+          "description": "MIME type, validated against MEDIA_ALLOWED_CONTENT_TYPE_PREFIXES."
+        },
+        "size": {
+          "type": "string",
+          "format": "int64",
+          "description": "Declared byte size, validated against MEDIA_MAX_FILE_SIZE_BYTES."
+        },
+        "orgId": {
+          "type": "string",
+          "description": "Optional: scope the upload to an organization."
+        }
+      }
+    },
+    "mediaInitUploadResponse": {
+      "type": "object",
+      "properties": {
+        "uploadId": {
+          "type": "string"
+        },
+        "fileId": {
+          "type": "string"
+        },
+        "bucket": {
+          "type": "string"
+        },
+        "objectKey": {
+          "type": "string"
+        },
+        "presignedUrl": {
+          "type": "string",
+          "description": "Presigned PUT URL — client uploads directly to S3 using this URL."
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "int64",
+          "description": "Unix timestamp when the presigned URL expires."
+        },
+        "requiredContentType": {
+          "type": "string",
+          "description": "The Content-Type header the client MUST set on the PUT request."
+        }
+      }
+    },
+    "mediaListFilesResponse": {
+      "type": "object",
+      "properties": {
+        "files": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/mediaMediaFile"
+          }
+        },
+        "total": {
+          "type": "integer",
+          "format": "int32"
+        }
+      }
+    },
+    "mediaMediaFile": {
+      "type": "object",
+      "properties": {
+        "base": {
+          "$ref": "#/definitions/baseBase"
+        },
+        "bucket": {
+          "type": "string"
+        },
+        "objectKey": {
+          "type": "string"
+        },
+        "contentType": {
+          "type": "string"
+        },
+        "size": {
+          "type": "string",
+          "format": "int64"
+        },
+        "etag": {
+          "type": "string"
+        },
+        "fileStatus": {
+          "$ref": "#/definitions/mediaMediaFileStatus"
+        },
+        "orgId": {
+          "type": "string",
+          "description": "org_id scopes the file to an organization (optional, reserved for future RBAC)."
+        },
+        "originalName": {
+          "type": "string",
+          "description": "original_name is the client-provided file name at upload time."
+        },
+        "publicUrl": {
+          "type": "string",
+          "description": "public_url is the direct S3 URL (valid only if bucket has public-read policy)."
+        }
+      },
+      "description": "MediaFile represents a confirmed, ready object stored in S3."
+    },
+    "mediaMediaFileStatus": {
+      "type": "string",
+      "enum": [
+        "MFS_NONE",
+        "MFS_READY",
+        "MFS_DELETED"
+      ],
+      "default": "MFS_NONE"
+    },
+    "mediaMediaUploadStatus": {
+      "type": "string",
+      "enum": [
+        "MUS_NONE",
+        "MUS_INIT",
+        "MUS_UPLOADING",
+        "MUS_READY",
+        "MUS_FAILED",
+        "MUS_EXPIRED"
+      ],
+      "default": "MUS_NONE"
+    },
+    "protobufAny": {
+      "type": "object",
+      "properties": {
+        "@type": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": {}
+    },
+    "rpcStatus": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "message": {
+          "type": "string"
+        },
+        "details": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/protobufAny"
+          }
+        }
+      }
+    }
+  }
+}

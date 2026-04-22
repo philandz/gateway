@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
     routing::{delete, get, patch, post},
     Json, Router,
@@ -29,7 +29,8 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/forgot", post(forgot_password))
         .route("/reset", post(reset_password))
         .route("/profile", get(profile))
-        .route("/organizations", get(list_organizations))
+        .route("/profile", patch(update_profile))
+        .route("/organizations", get(list_organizations).post(admin_create_organization))
         .route("/organizations/{org_id}/members", get(list_org_members))
         .route("/organizations/{org_id}/invitations", post(invite_member))
         .route("/invitations/{token}/accept", post(accept_invitation))
@@ -41,6 +42,13 @@ pub fn router() -> Router<Arc<AppState>> {
             "/organizations/{org_id}/members/{user_id}",
             delete(remove_org_member),
         )
+        // Admin — user CRUD (super_admin only, 403 otherwise)
+        .route("/users", get(admin_list_users).post(admin_create_user))
+        .route("/users/{user_id}", get(admin_get_user).patch(admin_update_user).delete(admin_delete_user))
+        // Admin — org CRUD (super_admin only, 403 otherwise)
+        .route("/organizations/all", get(admin_list_organizations))
+        .route("/organizations/{org_id}/detail", get(admin_get_organization))
+        .route("/organizations/{org_id}", patch(admin_update_organization).delete(admin_delete_organization))
 }
 
 async fn health(State(state): State<Arc<AppState>>) -> ApiResult<&'static str> {
@@ -116,6 +124,15 @@ struct ResetPasswordRequest {
 }
 
 #[derive(Deserialize)]
+struct UpdateProfileRequest {
+    display_name: Option<String>,
+    avatar: Option<String>,
+    bio: Option<String>,
+    timezone: Option<String>,
+    locale: Option<String>,
+}
+
+#[derive(Deserialize)]
 struct InviteMemberRequest {
     invitee_email: String,
     org_role: String,
@@ -124,6 +141,57 @@ struct InviteMemberRequest {
 #[derive(Deserialize)]
 struct ChangeOrgMemberRoleRequest {
     org_role: String,
+}
+
+#[derive(Deserialize)]
+struct AdminUpdateUserRequest {
+    display_name: Option<String>,
+    user_type: Option<String>,
+    status: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct AdminUpdateOrganizationRequest {
+    name: Option<String>,
+    status: Option<String>,
+}
+
+#[derive(Deserialize, Default)]
+struct AdminListQueryParams {
+    q: Option<String>,
+    status: Option<String>,
+    user_type: Option<String>,
+    sort_by: Option<String>,
+    sort_dir: Option<String>,
+    page: Option<i32>,
+    page_size: Option<i32>,
+}
+
+impl AdminListQueryParams {
+    fn to_proto(&self) -> pb::ListParams {
+        pb::ListParams {
+            query: self.q.clone(),
+            status: self.status.clone(),
+            sort_by: self.sort_by.clone(),
+            sort_dir: self.sort_dir.clone(),
+            page: self.page,
+            page_size: self.page_size,
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct AdminCreateUserRequest {
+    email: String,
+    password: String,
+    display_name: String,
+    user_type: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct AdminCreateOrganizationRequest {
+    name: String,
+    owner_user_id: String,
 }
 
 #[derive(Serialize)]
@@ -176,6 +244,10 @@ fn map_user(user: Option<&crate::pb::shared::user::User>) -> serde_json::Value {
             "base": map_base(u.base.as_ref()),
             "email": u.email,
             "display_name": u.display_name,
+            "avatar": u.avatar,
+            "bio": u.bio,
+            "timezone": u.timezone,
+            "locale": u.locale,
             "user_type": u.user_type,
         })
     })
@@ -219,6 +291,32 @@ fn parse_role(role: &str) -> ApiResult<i32> {
         _ => {
             return Err(map_status(Status::invalid_argument(
                 "org_role must be one of: owner, admin, member",
+            )));
+        }
+    };
+    Ok(parsed as i32)
+}
+
+fn parse_user_type(user_type: &str) -> ApiResult<i32> {
+    let parsed = match user_type.trim().to_lowercase().as_str() {
+        "normal" => crate::pb::shared::user::UserType::UtNormal,
+        "super_admin" => crate::pb::shared::user::UserType::UtSuperAdmin,
+        _ => {
+            return Err(map_status(Status::invalid_argument(
+                "user_type must be one of: normal, super_admin",
+            )));
+        }
+    };
+    Ok(parsed as i32)
+}
+
+fn parse_base_status(status: &str) -> ApiResult<i32> {
+    let parsed = match status.trim().to_lowercase().as_str() {
+        "active" => crate::pb::common::base::BaseStatus::BsActive,
+        "disabled" => crate::pb::common::base::BaseStatus::BsDisabled,
+        _ => {
+            return Err(map_status(Status::invalid_argument(
+                "status must be one of: active, disabled",
             )));
         }
     };
@@ -362,6 +460,32 @@ async fn profile(
     ))
 }
 
+async fn update_profile(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<UpdateProfileRequest>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let mut c = client(&state).await?;
+    let resp = c
+        .update_profile(with_auth(
+            &headers,
+            pb::UpdateProfileRequest {
+                display_name: body.display_name,
+                avatar: body.avatar,
+                bio: body.bio,
+                timezone: body.timezone,
+                locale: body.locale,
+            },
+        )?)
+        .await
+        .map_err(map_status)?
+        .into_inner();
+
+    Ok(Json(
+        serde_json::json!({ "user": map_user(resp.user.as_ref()) }),
+    ))
+}
+
 async fn list_organizations(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -374,8 +498,8 @@ async fn list_organizations(
         .into_inner();
     let organizations: Vec<serde_json::Value> = resp
         .organizations
-        .into_iter()
-        .map(|o| map_organization(&o))
+        .iter()
+        .map(map_org_summary)
         .collect();
     Ok(Json(serde_json::json!({"organizations": organizations})))
 }
@@ -485,4 +609,228 @@ async fn remove_org_member(
     Ok(Json(
         serde_json::json!({"message":"Member removed successfully"}),
     ))
+}
+
+async fn admin_list_users(
+    State(state): State<Arc<AppState>>,
+    Query(params): Query<AdminListQueryParams>,
+    headers: HeaderMap,
+) -> ApiResult<Json<serde_json::Value>> {
+    let mut c = client(&state).await?;
+    let proto_params = params.to_proto();
+    let resp = c
+        .list_users(with_auth(&headers, pb::ListUsersRequest {
+            params: Some(proto_params),
+            user_type: params.user_type,
+        })?)
+        .await
+        .map_err(map_status)?
+        .into_inner();
+
+    let users: Vec<serde_json::Value> = resp.users.iter().map(|u| map_user(Some(u))).collect();
+    let meta = resp.meta.as_ref().map_or(
+        serde_json::json!({"page":1,"page_size":20,"total_pages":1,"total_rows":0}),
+        |m| serde_json::json!({"page":m.page,"page_size":m.page_size,"total_pages":m.total_pages,"total_rows":m.total_rows}),
+    );
+    Ok(Json(serde_json::json!({"users": users, "meta": meta})))
+}
+
+async fn admin_create_user(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<AdminCreateUserRequest>,
+) -> ApiResult<(StatusCode, Json<serde_json::Value>)> {
+    let mut c = client(&state).await?;
+    let user_type = body.user_type.as_deref().map(parse_user_type).transpose()?;
+    let resp = c
+        .create_user(with_auth(
+            &headers,
+            pb::CreateUserRequest {
+                email: body.email,
+                password: body.password,
+                display_name: body.display_name,
+                user_type,
+            },
+        )?)
+        .await
+        .map_err(map_status)?
+        .into_inner();
+    Ok((
+        StatusCode::CREATED,
+        Json(serde_json::json!({"user": map_user(resp.user.as_ref())})),
+    ))
+}
+
+async fn admin_get_user(
+    State(state): State<Arc<AppState>>,
+    Path(user_id): Path<String>,
+    headers: HeaderMap,
+) -> ApiResult<Json<serde_json::Value>> {
+    let mut c = client(&state).await?;
+    let resp = c
+        .get_user(with_auth(&headers, pb::GetUserRequest { user_id })?)
+        .await
+        .map_err(map_status)?
+        .into_inner();
+
+    Ok(Json(
+        serde_json::json!({"user": map_user(resp.user.as_ref())}),
+    ))
+}
+
+async fn admin_update_user(
+    State(state): State<Arc<AppState>>,
+    Path(user_id): Path<String>,
+    headers: HeaderMap,
+    Json(body): Json<AdminUpdateUserRequest>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let mut c = client(&state).await?;
+
+    let user_type = body.user_type.as_deref().map(parse_user_type).transpose()?;
+    let status = body.status.as_deref().map(parse_base_status).transpose()?;
+
+    let resp = c
+        .update_user(with_auth(
+            &headers,
+            pb::UpdateUserRequest {
+                user_id,
+                display_name: body.display_name,
+                user_type,
+                status,
+            },
+        )?)
+        .await
+        .map_err(map_status)?
+        .into_inner();
+
+    Ok(Json(
+        serde_json::json!({"user": map_user(resp.user.as_ref())}),
+    ))
+}
+
+async fn admin_delete_user(
+    State(state): State<Arc<AppState>>,
+    Path(user_id): Path<String>,
+    headers: HeaderMap,
+) -> ApiResult<Json<serde_json::Value>> {
+    let mut c = client(&state).await?;
+    c.delete_user(with_auth(&headers, pb::DeleteUserRequest { user_id })?)
+        .await
+        .map_err(map_status)?;
+    Ok(Json(serde_json::json!({"message": "User deleted successfully"})))
+}
+
+async fn admin_list_organizations(
+    State(state): State<Arc<AppState>>,
+    Query(params): Query<AdminListQueryParams>,
+    headers: HeaderMap,
+) -> ApiResult<Json<serde_json::Value>> {
+    let mut c = client(&state).await?;
+    let proto_params = params.to_proto();
+    let resp = c
+        .list_organizations_admin(with_auth(&headers, pb::ListOrganizationsAdminRequest {
+            params: Some(proto_params),
+        })?)
+        .await
+        .map_err(map_status)?
+        .into_inner();
+
+    let organizations: Vec<serde_json::Value> = resp
+        .organizations
+        .into_iter()
+        .map(|o| map_organization(&o))
+        .collect();
+    let meta = resp.meta.as_ref().map_or(
+        serde_json::json!({"page":1,"page_size":20,"total_pages":1,"total_rows":0}),
+        |m| serde_json::json!({"page":m.page,"page_size":m.page_size,"total_pages":m.total_pages,"total_rows":m.total_rows}),
+    );
+    Ok(Json(serde_json::json!({"organizations": organizations, "meta": meta})))
+}
+
+async fn admin_create_organization(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<AdminCreateOrganizationRequest>,
+) -> ApiResult<(StatusCode, Json<serde_json::Value>)> {
+    let mut c = client(&state).await?;
+    let resp = c
+        .create_organization_admin(with_auth(
+            &headers,
+            pb::CreateOrganizationAdminRequest {
+                name: body.name,
+                owner_user_id: body.owner_user_id,
+            },
+        )?)
+        .await
+        .map_err(map_status)?
+        .into_inner();
+    Ok((
+        StatusCode::CREATED,
+        Json(serde_json::json!({
+            "organization": resp.organization.as_ref().map_or(serde_json::Value::Null, map_organization)
+        })),
+    ))
+}
+
+async fn admin_get_organization(
+    State(state): State<Arc<AppState>>,
+    Path(org_id): Path<String>,
+    headers: HeaderMap,
+) -> ApiResult<Json<serde_json::Value>> {
+    let mut c = client(&state).await?;
+    let resp = c
+        .get_organization_admin(with_auth(
+            &headers,
+            pb::GetOrganizationAdminRequest { org_id },
+        )?)
+        .await
+        .map_err(map_status)?
+        .into_inner();
+
+    Ok(Json(serde_json::json!({
+        "organization": resp.organization.as_ref().map_or(serde_json::Value::Null, map_organization)
+    })))
+}
+
+async fn admin_update_organization(
+    State(state): State<Arc<AppState>>,
+    Path(org_id): Path<String>,
+    headers: HeaderMap,
+    Json(body): Json<AdminUpdateOrganizationRequest>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let mut c = client(&state).await?;
+
+    let status = body.status.as_deref().map(parse_base_status).transpose()?;
+
+    let resp = c
+        .update_organization_admin(with_auth(
+            &headers,
+            pb::UpdateOrganizationAdminRequest {
+                org_id,
+                name: body.name,
+                status,
+            },
+        )?)
+        .await
+        .map_err(map_status)?
+        .into_inner();
+
+    Ok(Json(serde_json::json!({
+        "organization": resp.organization.as_ref().map_or(serde_json::Value::Null, map_organization)
+    })))
+}
+
+async fn admin_delete_organization(
+    State(state): State<Arc<AppState>>,
+    Path(org_id): Path<String>,
+    headers: HeaderMap,
+) -> ApiResult<Json<serde_json::Value>> {
+    let mut c = client(&state).await?;
+    c.delete_organization_admin(with_auth(
+        &headers,
+        pb::DeleteOrganizationAdminRequest { org_id },
+    )?)
+    .await
+    .map_err(map_status)?;
+    Ok(Json(serde_json::json!({"message": "Organization deleted successfully"})))
 }

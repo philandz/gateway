@@ -8,6 +8,18 @@ pub mod pb {
         pub mod identity {
             tonic::include_proto!("service.identity");
         }
+        pub mod media {
+            tonic::include_proto!("service.media");
+        }
+        pub mod budget {
+            tonic::include_proto!("service.budget");
+        }
+        pub mod category {
+            tonic::include_proto!("service.category");
+        }
+        pub mod entry {
+            tonic::include_proto!("service.entry");
+        }
     }
     pub mod shared {
         pub mod user {
@@ -16,10 +28,18 @@ pub mod pb {
         pub mod organization {
             tonic::include_proto!("shared.organization");
         }
+        pub mod media {
+            tonic::include_proto!("shared.media");
+        }
     }
 }
 
+pub mod budget;
+pub mod category;
+pub mod entry;
 pub mod identity;
+pub mod media;
+pub mod middleware;
 pub mod proxy;
 pub mod swagger;
 
@@ -50,11 +70,19 @@ impl From<philand_configs::IdentityTransportMode> for IdentityTransport {
 pub struct AppState {
     pub client: Client,
     pub monolith_url: String,
-    /// Base URL for identity HTTP transport (used in `proxy_http` fallback mode).
+    /// Base URL for identity HTTP proxy fallback mode.
     pub identity_url: String,
-    /// Base URL for media HTTP transport (HTTP proxy mode).
+    /// Base URL for media HTTP proxy fallback mode.
     pub media_url: String,
-    /// Identity service gRPC endpoint URL (e.g., "http://127.0.0.1:50051")
+    /// Identity service gRPC endpoint.
     pub identity_grpc_url: String,
+    /// Media service gRPC endpoint.
+    pub media_grpc_url: String,
+    /// Budget service gRPC endpoint.
+    pub budget_grpc_url: String,
+    /// Category service gRPC endpoint.
+    pub category_grpc_url: String,
+    /// Entry service gRPC endpoint.
+    pub entry_grpc_url: String,
     pub identity_transport: IdentityTransport,
 }
