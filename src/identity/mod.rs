@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
     routing::{delete, get, patch, post},
     Json, Router,
@@ -41,6 +41,7 @@ pub fn router() -> Router<Arc<AppState>> {
             "/organizations/{org_id}/members/{user_id}",
             delete(remove_org_member),
         )
+        .route("/users", get(admin_list_users))
 }
 
 async fn health(State(state): State<Arc<AppState>>) -> ApiResult<&'static str> {
@@ -126,6 +127,30 @@ struct ChangeOrgMemberRoleRequest {
     org_role: String,
 }
 
+#[derive(Deserialize, Default)]
+struct AdminListQueryParams {
+    q: Option<String>,
+    status: Option<String>,
+    user_type: Option<String>,
+    sort_by: Option<String>,
+    sort_dir: Option<String>,
+    page: Option<i32>,
+    page_size: Option<i32>,
+}
+
+impl AdminListQueryParams {
+    fn to_proto(&self) -> pb::ListParams {
+        pb::ListParams {
+            query: self.q.clone(),
+            status: self.status.clone(),
+            sort_by: self.sort_by.clone(),
+            sort_dir: self.sort_dir.clone(),
+            page: self.page,
+            page_size: self.page_size,
+        }
+    }
+}
+
 #[derive(Serialize)]
 struct OrgMemberResponse {
     user_id: String,
@@ -186,13 +211,6 @@ fn map_org_summary(org: &pb::OrganizationSummary) -> serde_json::Value {
         "id": org.id,
         "name": org.name,
         "role": org.role,
-    })
-}
-
-fn map_organization(org: &crate::pb::shared::organization::Organization) -> serde_json::Value {
-    serde_json::json!({
-        "base": map_base(org.base.as_ref()),
-        "name": org.name,
     })
 }
 
@@ -375,7 +393,7 @@ async fn list_organizations(
     let organizations: Vec<serde_json::Value> = resp
         .organizations
         .into_iter()
-        .map(|o| map_organization(&o))
+        .map(|o| map_org_summary(&o))
         .collect();
     Ok(Json(serde_json::json!({"organizations": organizations})))
 }
@@ -485,4 +503,31 @@ async fn remove_org_member(
     Ok(Json(
         serde_json::json!({"message":"Member removed successfully"}),
     ))
+}
+
+async fn admin_list_users(
+    State(state): State<Arc<AppState>>,
+    Query(params): Query<AdminListQueryParams>,
+    headers: HeaderMap,
+) -> ApiResult<Json<serde_json::Value>> {
+    let mut c = client(&state).await?;
+    let resp = c
+        .list_users(with_auth(
+            &headers,
+            pb::ListUsersRequest {
+                params: Some(params.to_proto()),
+                user_type: params.user_type,
+            },
+        )?)
+        .await
+        .map_err(map_status)?
+        .into_inner();
+
+    let users: Vec<serde_json::Value> = resp.users.iter().map(|u| map_user(Some(u))).collect();
+    let meta = resp.meta.as_ref().map_or(
+        serde_json::json!({"page":1,"page_size":20,"total_pages":1,"total_rows":0}),
+        |m| serde_json::json!({"page":m.page,"page_size":m.page_size,"total_pages":m.total_pages,"total_rows":m.total_rows}),
+    );
+
+    Ok(Json(serde_json::json!({"users": users, "meta": meta})))
 }
