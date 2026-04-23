@@ -61,7 +61,7 @@ fn with_user<T>(headers: &HeaderMap, req: T) -> ApiResult<GrpcRequest<T>> {
 
 fn extract_sub(bearer: &str) -> Option<String> {
     let token = bearer.strip_prefix("Bearer ")?;
-    let payload = token.splitn(3, '.').nth(1)?;
+    let payload = token.split('.').nth(1)?;
     let decoded = base64url_decode(payload)?;
     let claims: serde_json::Value = serde_json::from_slice(&decoded).ok()?;
     claims

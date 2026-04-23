@@ -101,7 +101,7 @@ fn with_user<T>(headers: &HeaderMap, req: T) -> ApiResult<GrpcRequest<T>> {
 /// Extract `sub` claim from a Bearer JWT without signature verification.
 fn extract_sub_from_bearer(bearer: &str) -> Option<String> {
     let token = bearer.strip_prefix("Bearer ")?;
-    let payload_b64 = token.splitn(3, '.').nth(1)?;
+    let payload_b64 = token.split('.').nth(1)?;
     let decoded = base64url_decode_jwt(payload_b64)?;
     let claims: serde_json::Value = serde_json::from_slice(&decoded).ok()?;
     claims

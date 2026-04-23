@@ -40,9 +40,7 @@ pub async fn reject_super_admin_on_user_paths(
 /// Extracts `user_type` claim from a JWT without full verification.
 /// The gateway already validated the signature upstream; this is a thin claim read.
 fn extract_user_type_from_jwt(token: &str) -> Option<String> {
-    let mut parts = token.splitn(3, '.');
-    parts.next()?; // header
-    let payload_b64 = parts.next()?;
+    let payload_b64 = token.split('.').nth(1)?;
     let decoded = base64url_decode(payload_b64)?;
     let claims: serde_json::Value = serde_json::from_slice(&decoded).ok()?;
     claims
