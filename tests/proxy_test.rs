@@ -58,6 +58,11 @@ async fn spawn_proxy(monolith_addr: SocketAddr) -> SocketAddr {
         identity_url: "http://127.0.0.1:1".to_string(), // unused in monolith tests
         media_url: "http://127.0.0.1:1".to_string(),
         identity_grpc_url: "http://127.0.0.1:1".to_string(),
+        media_grpc_url: "http://127.0.0.1:1".to_string(),
+        budget_grpc_url: "http://127.0.0.1:1".to_string(),
+        category_grpc_url: "http://127.0.0.1:1".to_string(),
+        entry_grpc_url: "http://127.0.0.1:1".to_string(),
+        sharing_grpc_url: "http://127.0.0.1:1".to_string(),
         identity_transport: IdentityTransport::ProxyHttp,
     });
 
@@ -174,6 +179,11 @@ async fn test_proxy_returns_bad_gateway_on_unreachable_upstream() {
         identity_url: "http://127.0.0.1:1".to_string(),
         media_url: "http://127.0.0.1:1".to_string(),
         identity_grpc_url: "http://127.0.0.1:1".to_string(),
+        media_grpc_url: "http://127.0.0.1:1".to_string(),
+        budget_grpc_url: "http://127.0.0.1:1".to_string(),
+        category_grpc_url: "http://127.0.0.1:1".to_string(),
+        entry_grpc_url: "http://127.0.0.1:1".to_string(),
+        sharing_grpc_url: "http://127.0.0.1:1".to_string(),
         identity_transport: IdentityTransport::ProxyHttp,
     });
 
