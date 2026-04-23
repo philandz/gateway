@@ -30,7 +30,10 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/reset", post(reset_password))
         .route("/profile", get(profile))
         .route("/profile", patch(update_profile))
-        .route("/organizations", get(list_organizations).post(admin_create_organization))
+        .route(
+            "/organizations",
+            get(list_organizations).post(admin_create_organization),
+        )
         .route("/organizations/{org_id}/members", get(list_org_members))
         .route("/organizations/{org_id}/invitations", post(invite_member))
         .route("/invitations/{token}/accept", post(accept_invitation))
@@ -44,11 +47,22 @@ pub fn router() -> Router<Arc<AppState>> {
         )
         // Admin — user CRUD (super_admin only, 403 otherwise)
         .route("/users", get(admin_list_users).post(admin_create_user))
-        .route("/users/{user_id}", get(admin_get_user).patch(admin_update_user).delete(admin_delete_user))
+        .route(
+            "/users/{user_id}",
+            get(admin_get_user)
+                .patch(admin_update_user)
+                .delete(admin_delete_user),
+        )
         // Admin — org CRUD (super_admin only, 403 otherwise)
         .route("/organizations/all", get(admin_list_organizations))
-        .route("/organizations/{org_id}/detail", get(admin_get_organization))
-        .route("/organizations/{org_id}", patch(admin_update_organization).delete(admin_delete_organization))
+        .route(
+            "/organizations/{org_id}/detail",
+            get(admin_get_organization),
+        )
+        .route(
+            "/organizations/{org_id}",
+            patch(admin_update_organization).delete(admin_delete_organization),
+        )
 }
 
 async fn health(State(state): State<Arc<AppState>>) -> ApiResult<&'static str> {
@@ -496,11 +510,8 @@ async fn list_organizations(
         .await
         .map_err(map_status)?
         .into_inner();
-    let organizations: Vec<serde_json::Value> = resp
-        .organizations
-        .iter()
-        .map(map_org_summary)
-        .collect();
+    let organizations: Vec<serde_json::Value> =
+        resp.organizations.iter().map(map_org_summary).collect();
     Ok(Json(serde_json::json!({"organizations": organizations})))
 }
 
@@ -619,10 +630,13 @@ async fn admin_list_users(
     let mut c = client(&state).await?;
     let proto_params = params.to_proto();
     let resp = c
-        .list_users(with_auth(&headers, pb::ListUsersRequest {
-            params: Some(proto_params),
-            user_type: params.user_type,
-        })?)
+        .list_users(with_auth(
+            &headers,
+            pb::ListUsersRequest {
+                params: Some(proto_params),
+                user_type: params.user_type,
+            },
+        )?)
         .await
         .map_err(map_status)?
         .into_inner();
@@ -717,7 +731,9 @@ async fn admin_delete_user(
     c.delete_user(with_auth(&headers, pb::DeleteUserRequest { user_id })?)
         .await
         .map_err(map_status)?;
-    Ok(Json(serde_json::json!({"message": "User deleted successfully"})))
+    Ok(Json(
+        serde_json::json!({"message": "User deleted successfully"}),
+    ))
 }
 
 async fn admin_list_organizations(
@@ -728,9 +744,12 @@ async fn admin_list_organizations(
     let mut c = client(&state).await?;
     let proto_params = params.to_proto();
     let resp = c
-        .list_organizations_admin(with_auth(&headers, pb::ListOrganizationsAdminRequest {
-            params: Some(proto_params),
-        })?)
+        .list_organizations_admin(with_auth(
+            &headers,
+            pb::ListOrganizationsAdminRequest {
+                params: Some(proto_params),
+            },
+        )?)
         .await
         .map_err(map_status)?
         .into_inner();
@@ -744,7 +763,9 @@ async fn admin_list_organizations(
         serde_json::json!({"page":1,"page_size":20,"total_pages":1,"total_rows":0}),
         |m| serde_json::json!({"page":m.page,"page_size":m.page_size,"total_pages":m.total_pages,"total_rows":m.total_rows}),
     );
-    Ok(Json(serde_json::json!({"organizations": organizations, "meta": meta})))
+    Ok(Json(
+        serde_json::json!({"organizations": organizations, "meta": meta}),
+    ))
 }
 
 async fn admin_create_organization(
@@ -832,5 +853,7 @@ async fn admin_delete_organization(
     )?)
     .await
     .map_err(map_status)?;
-    Ok(Json(serde_json::json!({"message": "Organization deleted successfully"})))
+    Ok(Json(
+        serde_json::json!({"message": "Organization deleted successfully"}),
+    ))
 }

@@ -20,6 +20,9 @@ pub mod pb {
         pub mod entry {
             tonic::include_proto!("service.entry");
         }
+        pub mod sharing {
+            tonic::include_proto!("service.sharing");
+        }
     }
     pub mod shared {
         pub mod user {
@@ -41,6 +44,7 @@ pub mod identity;
 pub mod media;
 pub mod middleware;
 pub mod proxy;
+pub mod sharing;
 pub mod swagger;
 
 use reqwest::Client;
@@ -84,5 +88,7 @@ pub struct AppState {
     pub category_grpc_url: String,
     /// Entry service gRPC endpoint.
     pub entry_grpc_url: String,
+    /// Sharing service gRPC endpoint.
+    pub sharing_grpc_url: String,
     pub identity_transport: IdentityTransport,
 }

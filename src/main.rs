@@ -31,6 +31,8 @@ async fn main() -> anyhow::Result<()> {
         env::var("CATEGORY_GRPC_URL").unwrap_or_else(|_| "http://127.0.0.1:50104".to_string());
     let entry_grpc_url =
         env::var("ENTRY_GRPC_URL").unwrap_or_else(|_| "http://127.0.0.1:50105".to_string());
+    let sharing_grpc_url =
+        env::var("SHARING_GRPC_URL").unwrap_or_else(|_| "http://127.0.0.1:50106".to_string());
 
     let state = Arc::new(AppState {
         client: Client::new(),
@@ -42,6 +44,7 @@ async fn main() -> anyhow::Result<()> {
         budget_grpc_url,
         category_grpc_url,
         entry_grpc_url,
+        sharing_grpc_url,
         identity_transport,
     });
 
@@ -60,6 +63,7 @@ async fn main() -> anyhow::Result<()> {
             .nest("/budget", gateway::budget::router())
             .nest("/category", gateway::category::router())
             .nest("/entry", gateway::entry::router())
+            .nest("/sharing", gateway::sharing::router())
             .merge(gateway::proxy::router()),
     }
     .layer(middleware::from_fn(

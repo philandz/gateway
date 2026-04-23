@@ -1,10 +1,4 @@
-use axum::{
-    extract::Request,
-    http::StatusCode,
-    middleware::Next,
-    response::Response,
-    Json,
-};
+use axum::{extract::Request, http::StatusCode, middleware::Next, response::Response, Json};
 
 /// Rejects Super Admin JWTs on non-admin paths.
 /// Super Admins must use /api/identity/* (admin endpoints) only.
@@ -101,11 +95,15 @@ fn base64_decode_standard(input: &str) -> Option<Vec<u8>> {
         }
         out.push((v0 << 2) | (v1 >> 4));
         if bytes[i + 2] != b'=' {
-            if v2 == 0xff { return None; }
+            if v2 == 0xff {
+                return None;
+            }
             out.push((v1 << 4) | (v2 >> 2));
         }
         if bytes[i + 3] != b'=' {
-            if v3 == 0xff { return None; }
+            if v3 == 0xff {
+                return None;
+            }
             out.push((v2 << 6) | v3);
         }
         i += 4;

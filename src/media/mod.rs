@@ -11,12 +11,9 @@ use tonic::{metadata::MetadataValue, transport::Channel, Request as GrpcRequest,
 
 use crate::pb::service::media::media_service_client::MediaServiceClient;
 use crate::pb::service::media::{
-    CompleteUploadRequest as PbCompleteUploadRequest,
-    DeleteFileRequest as PbDeleteFileRequest,
-    GetFileDownloadUrlRequest as PbGetFileDownloadUrlRequest,
-    GetFileRequest as PbGetFileRequest,
-    InitUploadRequest as PbInitUploadRequest,
-    ListFilesRequest as PbListFilesRequest,
+    CompleteUploadRequest as PbCompleteUploadRequest, DeleteFileRequest as PbDeleteFileRequest,
+    GetFileDownloadUrlRequest as PbGetFileDownloadUrlRequest, GetFileRequest as PbGetFileRequest,
+    InitUploadRequest as PbInitUploadRequest, ListFilesRequest as PbListFilesRequest,
 };
 use crate::pb::shared::media::{MediaFileStatus, MediaUploadStatus};
 use crate::AppState;
