@@ -23,6 +23,16 @@ async fn main() -> anyhow::Result<()> {
     let identity_transport: IdentityTransport = config.identity_transport.into();
 
     let media_url = env::var("MEDIA_URL").unwrap_or_else(|_| "http://127.0.0.1:3002".to_string());
+    let media_grpc_url =
+        env::var("MEDIA_GRPC_URL").unwrap_or_else(|_| "http://127.0.0.1:50052".to_string());
+    let budget_grpc_url =
+        env::var("BUDGET_GRPC_URL").unwrap_or_else(|_| "http://127.0.0.1:50103".to_string());
+    let category_grpc_url =
+        env::var("CATEGORY_GRPC_URL").unwrap_or_else(|_| "http://127.0.0.1:50104".to_string());
+    let entry_grpc_url =
+        env::var("ENTRY_GRPC_URL").unwrap_or_else(|_| "http://127.0.0.1:50105".to_string());
+    let sharing_grpc_url =
+        env::var("SHARING_GRPC_URL").unwrap_or_else(|_| "http://127.0.0.1:50106".to_string());
 
     let state = Arc::new(AppState {
         client: Client::new(),
@@ -30,6 +40,11 @@ async fn main() -> anyhow::Result<()> {
         identity_url: config.identity_url,
         media_url,
         identity_grpc_url: config.identity_grpc_url,
+        media_grpc_url,
+        budget_grpc_url,
+        category_grpc_url,
+        entry_grpc_url,
+        sharing_grpc_url,
         identity_transport,
     });
 
@@ -44,8 +59,16 @@ async fn main() -> anyhow::Result<()> {
         IdentityTransport::ProxyHttp => gateway::proxy::router_with_identity(),
         IdentityTransport::GrpcTranscode => Router::new()
             .nest("/identity", gateway::identity::router())
+            .nest("/media", gateway::media::router())
+            .nest("/budget", gateway::budget::router())
+            .nest("/category", gateway::category::router())
+            .nest("/entry", gateway::entry::router())
+            .nest("/sharing", gateway::sharing::router())
             .merge(gateway::proxy::router()),
-    };
+    }
+    .layer(middleware::from_fn(
+        gateway::middleware::reject_super_admin_on_user_paths,
+    ));
 
     let is_local_docs = is_localhost_binding(&config.host);
     let swagger_router = if is_local_docs {
