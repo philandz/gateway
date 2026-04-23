@@ -275,6 +275,17 @@ fn map_org_summary(org: &pb::OrganizationSummary) -> serde_json::Value {
     })
 }
 
+fn map_organization(org: &crate::pb::shared::organization::Organization) -> serde_json::Value {
+    let base = org.base.as_ref();
+    serde_json::json!({
+        "id": base.map(|b| b.id.as_str()).unwrap_or(""),
+        "name": org.name,
+        "status": base.map(|b| b.status).unwrap_or(0),
+        "created_at": base.map(|b| b.created_at).unwrap_or(0),
+        "updated_at": base.map(|b| b.updated_at).unwrap_or(0),
+    })
+}
+
 fn map_invitation(invitation: Option<&pb::OrganizationInvitation>) -> serde_json::Value {
     invitation.map_or(serde_json::Value::Null, |i| {
         serde_json::json!({

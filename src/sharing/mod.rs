@@ -3,7 +3,7 @@ use std::sync::Arc;
 use axum::{
     extract::{Path, State},
     http::{HeaderMap, StatusCode},
-    routing::{delete, get, post},
+    routing::{get, post},
     Json, Router,
 };
 use serde::Deserialize;
@@ -77,7 +77,6 @@ fn base64url_decode(input: &str) -> Option<Vec<u8>> {
         3 => s.push('='),
         _ => {}
     }
-    use std::io::Read;
     let mut out = Vec::new();
     let bytes = s.as_bytes();
     const T: [u8; 128] = {
