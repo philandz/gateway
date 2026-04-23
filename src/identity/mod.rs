@@ -275,13 +275,6 @@ fn map_org_summary(org: &pb::OrganizationSummary) -> serde_json::Value {
     })
 }
 
-fn map_organization(org: &crate::pb::shared::organization::Organization) -> serde_json::Value {
-    serde_json::json!({
-        "base": map_base(org.base.as_ref()),
-        "name": org.name,
-    })
-}
-
 fn map_invitation(invitation: Option<&pb::OrganizationInvitation>) -> serde_json::Value {
     invitation.map_or(serde_json::Value::Null, |i| {
         serde_json::json!({
