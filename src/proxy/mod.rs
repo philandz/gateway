@@ -59,7 +59,7 @@ async fn media_proxy_handler(
     forward_request(&state, req, &uri).await
 }
 
-async fn media_public_proxy_handler(
+pub async fn media_public_proxy_handler(
     State(state): State<Arc<AppState>>,
     req: Request,
 ) -> Result<Response, StatusCode> {
