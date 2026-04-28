@@ -23,6 +23,7 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/health", get(health))
         .route("/register", post(register))
         .route("/login", post(login))
+        .route("/auth/google", post(login_with_google))
         .route("/logout", post(logout))
         .route("/refresh", post(refresh))
         .route("/update", post(change_password))
@@ -370,6 +371,35 @@ async fn login(
         .login(GrpcRequest::new(pb::LoginRequest {
             email: body.email,
             password: body.password,
+        }))
+        .await
+        .map_err(map_status)?
+        .into_inner();
+    let organizations: Vec<serde_json::Value> = resp
+        .organizations
+        .into_iter()
+        .map(|o| map_org_summary(&o))
+        .collect();
+    Ok(Json(serde_json::json!({
+        "access_token": resp.access_token,
+        "user_type": resp.user_type,
+        "organizations": organizations,
+    })))
+}
+
+#[derive(Deserialize)]
+struct LoginWithGoogleRequest {
+    id_token: String,
+}
+
+async fn login_with_google(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<LoginWithGoogleRequest>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let mut c = client(&state).await?;
+    let resp = c
+        .login_with_google(GrpcRequest::new(pb::LoginWithGoogleRequest {
+            id_token: body.id_token,
         }))
         .await
         .map_err(map_status)?
