@@ -1,4 +1,9 @@
-use axum::{http::StatusCode, middleware, routing::get, Router};
+use axum::{
+    http::StatusCode,
+    middleware,
+    routing::{any, get},
+    Router,
+};
 use reqwest::Client;
 use std::{env, net::SocketAddr, sync::Arc};
 use tower_http::cors::{Any, CorsLayer};
@@ -79,6 +84,10 @@ async fn main() -> anyhow::Result<()> {
 
     let app = Router::new()
         .route("/health", get(|| async { "OK" }))
+        .route(
+            "/public/{*path}",
+            any(gateway::proxy::media_public_proxy_handler),
+        )
         .nest("/api", api_router)
         .merge(swagger_router)
         .layer(TraceLayer::new_for_http())
