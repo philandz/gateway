@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use axum::{
     extract::{Path, State},
@@ -18,6 +18,7 @@ type ApiResult<T> = Result<T, (StatusCode, Json<ErrorResponse>)>;
 
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
+        .route("/health", get(health))
         .route(
             "/budgets/{budget_id}/categories",
             get(list_categories).post(create_category),
@@ -29,6 +30,22 @@ pub fn router() -> Router<Arc<AppState>> {
                 .delete(delete_category),
         )
         .route("/categories/{category_id}/archive", patch(archive_category))
+}
+
+async fn health(State(state): State<Arc<AppState>>) -> ApiResult<&'static str> {
+    let res = tokio::time::timeout(
+        Duration::from_secs(2),
+        CategoryServiceClient::connect(state.category_grpc_url.clone()),
+    )
+    .await;
+
+    match res {
+        Ok(Ok(_)) => Ok("OK"),
+        Ok(Err(e)) => Err(map_status(Status::unavailable(e.to_string()))),
+        Err(_) => Err(map_status(Status::deadline_exceeded(
+            "Category gRPC connect timed out",
+        ))),
+    }
 }
 
 fn map_status(status: Status) -> (StatusCode, Json<ErrorResponse>) {
