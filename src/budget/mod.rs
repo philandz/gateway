@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use axum::{
     extract::{Path, Query, State},
@@ -18,6 +18,7 @@ type ApiResult<T> = Result<T, (StatusCode, Json<ErrorResponse>)>;
 
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
+        .route("/health", get(health))
         .route("/budgets", get(list_budgets).post(create_budget))
         .route(
             "/budgets/{budget_id}",
@@ -64,6 +65,23 @@ pub fn router() -> Router<Arc<AppState>> {
             "/invest/assets/{asset_id}/snapshots/latest",
             get(get_latest_price_snapshot),
         )
+}
+
+async fn health(State(state): State<Arc<AppState>>) -> ApiResult<&'static str> {
+    // Used by k8s / external probes to verify the downstream gRPC is reachable.
+    let res = tokio::time::timeout(
+        Duration::from_secs(2),
+        BudgetServiceClient::connect(state.budget_grpc_url.clone()),
+    )
+    .await;
+
+    match res {
+        Ok(Ok(_)) => Ok("OK"),
+        Ok(Err(e)) => Err(map_status(Status::unavailable(e.to_string()))),
+        Err(_) => Err(map_status(Status::deadline_exceeded(
+            "Budget gRPC connect timed out",
+        ))),
+    }
 }
 
 fn map_status(status: Status) -> (StatusCode, Json<ErrorResponse>) {
