@@ -63,6 +63,8 @@ pub fn router() -> Router<Arc<AppState>> {
             "/organizations/{org_id}",
             patch(admin_update_organization).delete(admin_delete_organization),
         )
+        // Google SSO
+        .route("/login/google", post(login_google))
 }
 
 async fn health(State(state): State<Arc<AppState>>) -> ApiResult<&'static str> {
@@ -206,6 +208,11 @@ struct AdminCreateUserRequest {
 struct AdminCreateOrganizationRequest {
     name: String,
     owner_user_id: String,
+}
+
+#[derive(Deserialize)]
+struct LoginWithGoogleRequest {
+    id_token: String,
 }
 
 #[derive(Serialize)]
@@ -370,6 +377,30 @@ async fn login(
         .login(GrpcRequest::new(pb::LoginRequest {
             email: body.email,
             password: body.password,
+        }))
+        .await
+        .map_err(map_status)?
+        .into_inner();
+    let organizations: Vec<serde_json::Value> = resp
+        .organizations
+        .into_iter()
+        .map(|o| map_org_summary(&o))
+        .collect();
+    Ok(Json(serde_json::json!({
+        "access_token": resp.access_token,
+        "user_type": resp.user_type,
+        "organizations": organizations,
+    })))
+}
+
+async fn login_google(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<LoginWithGoogleRequest>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let mut c = client(&state).await?;
+    let resp = c
+        .login_with_google(GrpcRequest::new(pb::LoginWithGoogleRequest {
+            id_token: body.id_token,
         }))
         .await
         .map_err(map_status)?
