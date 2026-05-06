@@ -343,8 +343,9 @@ async fn accept_join_link(
 // ---------------------------------------------------------------------------
 
 fn map_expense(e: &pb::Expense) -> serde_json::Value {
+    let base = e.base.as_ref();
     serde_json::json!({
-        "id":           e.id,
+        "id":           base.map(|b| b.id.as_str()).unwrap_or_default(),
         "budget_id":    e.budget_id,
         "paid_by":      e.paid_by,
         "total_amount": e.total_amount,
@@ -356,8 +357,8 @@ fn map_expense(e: &pb::Expense) -> serde_json::Value {
             "user_id": l.user_id,
             "amount":  l.amount,
         })).collect::<Vec<_>>(),
-        "created_by":   e.created_by,
-        "created_at":   e.created_at,
-        "updated_at":   e.updated_at,
+        "created_by":   base.map(|b| b.created_by.as_str()).unwrap_or_default(),
+        "created_at":   base.map(|b| b.created_at).unwrap_or(0),
+        "updated_at":   base.map(|b| b.updated_at).unwrap_or(0),
     })
 }
