@@ -785,16 +785,28 @@ async fn list_price_snapshots(
 
 fn map_budget(budget: Option<&pb::Budget>) -> serde_json::Value {
     budget.map_or(serde_json::Value::Null, |b| {
-        let base = b.base.as_ref();
         serde_json::json!({
-            "id":          base.map(|x| &x.id).map_or("", |s| s),
+            "base": map_base(b.base.as_ref()),
             "org_id":      b.org_id,
             "name":        b.name,
             "budget_type": b.budget_type,
             "currency":    b.currency,
             "my_role":     b.my_role,
-            "created_at":  base.map(|x| x.created_at).unwrap_or(0),
-            "updated_at":  base.map(|x| x.updated_at).unwrap_or(0),
+        })
+    })
+}
+
+fn map_base(base: Option<&crate::pb::common::base::Base>) -> serde_json::Value {
+    base.map_or(serde_json::Value::Null, |b| {
+        serde_json::json!({
+            "id": b.id,
+            "created_at": b.created_at,
+            "updated_at": b.updated_at,
+            "deleted_at": b.deleted_at,
+            "created_by": b.created_by,
+            "updated_by": b.updated_by,
+            "owner_id": b.owner_id,
+            "status": b.status,
         })
     })
 }
