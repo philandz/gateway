@@ -228,7 +228,7 @@ struct ListBudgetsQuery {
 
 #[derive(Deserialize)]
 struct AddMemberRequest {
-    user_id: String,
+    email: String,
     role: Option<i32>,
 }
 
@@ -395,7 +395,7 @@ async fn add_member(
             &headers,
             pb::AddBudgetMemberRequest {
                 budget_id,
-                user_id: body.user_id,
+                user_id: body.email,
                 role: body.role.unwrap_or(4), // Viewer default
             },
         )?)

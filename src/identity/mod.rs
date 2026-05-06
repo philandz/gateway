@@ -275,8 +275,9 @@ fn map_user(user: Option<&crate::pb::shared::user::User>) -> serde_json::Value {
 }
 
 fn map_org_summary(org: &pb::OrganizationSummary) -> serde_json::Value {
+    let base = org.base.as_ref();
     serde_json::json!({
-        "id": org.id,
+        "id": base.map(|b| b.id.as_str()).unwrap_or_default(),
         "name": org.name,
         "role": org.role,
     })
@@ -295,15 +296,16 @@ fn map_organization(org: &crate::pb::shared::organization::Organization) -> serd
 
 fn map_invitation(invitation: Option<&pb::OrganizationInvitation>) -> serde_json::Value {
     invitation.map_or(serde_json::Value::Null, |i| {
+        let base = i.base.as_ref();
         serde_json::json!({
-            "id": i.id,
+            "id": base.map(|b| b.id.as_str()).unwrap_or_default(),
             "org_id": i.org_id,
             "inviter_id": i.inviter_id,
             "invitee_email": i.invitee_email,
             "org_role": i.org_role,
             "status": i.status,
             "expires_at": i.expires_at,
-            "created_at": i.created_at,
+            "created_at": base.map(|b| b.created_at).unwrap_or(0),
         })
     })
 }
