@@ -299,8 +299,9 @@ async fn delete_category(
 }
 
 fn map_cat(c: &pb::Category) -> serde_json::Value {
+    let base = c.base.as_ref();
     serde_json::json!({
-        "id":             c.id,
+        "id":             base.map(|b| b.id.as_str()).unwrap_or_default(),
         "budget_id":      c.budget_id,
         "name":           c.name,
         "cat_type":       c.cat_type,
@@ -311,7 +312,7 @@ fn map_cat(c: &pb::Category) -> serde_json::Value {
         "usage_pct":      c.usage_pct,
         "tx_count":       c.tx_count,
         "archived":       c.archived,
-        "created_at":     c.created_at,
-        "updated_at":     c.updated_at,
+        "created_at":     base.map(|b| b.created_at).unwrap_or(0),
+        "updated_at":     base.map(|b| b.updated_at).unwrap_or(0),
     })
 }
