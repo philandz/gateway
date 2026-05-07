@@ -23,6 +23,7 @@ type ApiResult<T> = Result<T, (StatusCode, Json<ErrorResponse>)>;
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/health", get(health))
+        .route("/test-get", get(test_get_handler))
         .route("/register", post(register))
         .route("/login", post(login))
         .route("/logout", post(logout))
@@ -70,6 +71,10 @@ pub fn router() -> Router<Arc<AppState>> {
         )
         // Google SSO
         .route("/login/google", post(login_google))
+}
+
+async fn test_get_handler() -> ApiResult<Json<serde_json::Value>> {
+    Ok(Json(serde_json::json!({"test": "ok"})))
 }
 
 async fn health(State(state): State<Arc<AppState>>) -> ApiResult<&'static str> {
