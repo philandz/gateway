@@ -229,12 +229,12 @@ struct ListBudgetsQuery {
 #[derive(Deserialize)]
 struct AddMemberRequest {
     email: String,
-    role: Option<i32>,
+    role: Option<serde_json::Value>,
 }
 
 #[derive(Deserialize)]
 struct UpdateMemberRoleRequest {
-    role: i32,
+    role: serde_json::Value,
 }
 
 #[derive(Deserialize)]
@@ -396,7 +396,7 @@ async fn add_member(
             pb::AddBudgetMemberRequest {
                 budget_id,
                 user_id: body.email,
-                role: body.role.unwrap_or(4), // Viewer default
+                role: parse_budget_role(body.role.as_ref()),
             },
         )?)
         .await
@@ -421,7 +421,7 @@ async fn update_member_role(
             pb::UpdateBudgetMemberRoleRequest {
                 budget_id,
                 user_id,
-                role: body.role,
+                role: parse_budget_role(Some(&body.role)),
             },
         )?)
         .await
@@ -834,6 +834,21 @@ fn parse_budget_type(v: Option<&serde_json::Value>) -> i32 {
             _ => 1,
         },
         _ => 1,
+    }
+}
+
+/// Convert a budget_role value that may be a string ("owner") or integer (1) to proto i32.
+fn parse_budget_role(v: Option<&serde_json::Value>) -> i32 {
+    match v {
+        Some(serde_json::Value::Number(n)) => n.as_i64().unwrap_or(4) as i32,
+        Some(serde_json::Value::String(s)) => match s.as_str() {
+            "owner" => 1,
+            "manager" => 2,
+            "contributor" => 3,
+            "viewer" => 4,
+            _ => 4,
+        },
+        _ => 4,
     }
 }
 
