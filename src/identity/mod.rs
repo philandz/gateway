@@ -609,7 +609,10 @@ async fn list_org_invitations_proxy(
     headers: HeaderMap,
 ) -> ApiResult<Response> {
     // Proxy to identity REST server
-    let uri = format!("{}/organizations/{}/invitations", state.identity_url, org_id);
+    let uri = format!(
+        "{}/organizations/{}/invitations",
+        state.identity_url, org_id
+    );
     proxy_request(&state, &headers, &uri).await
 }
 
@@ -934,31 +937,26 @@ async fn proxy_request(
         response_builder = response_builder.header(name.clone(), value.clone());
     }
 
-    let response_body = res
-        .bytes()
-        .await
-        .map_err(|_| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorResponse {
-                    code: "internal".to_string(),
-                    message: "Failed to read response body".to_string(),
-                    details: vec![],
-                }),
-            )
-        })?;
+    let response_body = res.bytes().await.map_err(|_| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                code: "internal".to_string(),
+                message: "Failed to read response body".to_string(),
+                details: vec![],
+            }),
+        )
+    })?;
     let body = Body::from(response_body);
 
-    response_builder
-        .body(body)
-        .map_err(|_| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorResponse {
-                    code: "internal".to_string(),
-                    message: "Failed to build response".to_string(),
-                    details: vec![],
-                }),
-            )
-        })
+    response_builder.body(body).map_err(|_| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                code: "internal".to_string(),
+                message: "Failed to build response".to_string(),
+                details: vec![],
+            }),
+        )
+    })
 }
