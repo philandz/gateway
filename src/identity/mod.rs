@@ -1,8 +1,10 @@
 use std::sync::Arc;
 
 use axum::{
+    body::Body,
     extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
+    response::Response,
     routing::{delete, get, patch, post},
     Json, Router,
 };
@@ -35,7 +37,10 @@ pub fn router() -> Router<Arc<AppState>> {
             get(list_organizations).post(admin_create_organization),
         )
         .route("/organizations/{org_id}/members", get(list_org_members))
-        .route("/organizations/{org_id}/invitations", post(invite_member))
+        .route(
+            "/organizations/{org_id}/invitations",
+            get(list_org_invitations_proxy).post(invite_member),
+        )
         .route("/invitations/{token}/accept", post(accept_invitation))
         .route(
             "/organizations/{org_id}/members/{user_id}/role",
@@ -598,6 +603,15 @@ async fn invite_member(
     })))
 }
 
+async fn list_org_invitations_proxy(
+    State(state): State<Arc<AppState>>,
+    Path(org_id): Path<String>,
+    headers: HeaderMap,
+) -> ApiResult<Response> {
+    let uri = format!("{}/organizations/{}/invitations", state.identity_url, org_id);
+    proxy_request(&state, &headers, &uri).await
+}
+
 async fn accept_invitation(
     State(state): State<Arc<AppState>>,
     Path(token): Path<String>,
@@ -886,4 +900,64 @@ async fn admin_delete_organization(
     Ok(Json(
         serde_json::json!({"message": "Organization deleted successfully"}),
     ))
+}
+
+async fn proxy_request(
+    state: &Arc<AppState>,
+    headers: &HeaderMap,
+    uri: &str,
+) -> ApiResult<Response> {
+    let mut proxy_req = state.client.request(axum::http::Method::GET, uri);
+
+    for (name, value) in headers {
+        if name != axum::http::header::HOST {
+            proxy_req = proxy_req.header(name.clone(), value.clone());
+        }
+    }
+
+    let res = proxy_req.send().await.map_err(|e| {
+        tracing::error!("Proxy error: {}", e);
+        (
+            StatusCode::BAD_GATEWAY,
+            Json(ErrorResponse {
+                code: "bad_gateway".to_string(),
+                message: e.to_string(),
+                details: vec![],
+            }),
+        )
+    })?;
+
+    let mut response_builder = Response::builder().status(res.status());
+
+    for (name, value) in res.headers() {
+        response_builder = response_builder.header(name.clone(), value.clone());
+    }
+
+    let response_body = res
+        .bytes()
+        .await
+        .map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse {
+                    code: "internal".to_string(),
+                    message: "Failed to read response body".to_string(),
+                    details: vec![],
+                }),
+            )
+        })?;
+    let body = Body::from(response_body);
+
+    response_builder
+        .body(body)
+        .map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse {
+                    code: "internal".to_string(),
+                    message: "Failed to build response".to_string(),
+                    details: vec![],
+                }),
+            )
+        })
 }
