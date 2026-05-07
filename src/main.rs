@@ -68,8 +68,7 @@ async fn main() -> anyhow::Result<()> {
             .nest("/budget", gateway::budget::router())
             .nest("/category", gateway::category::router())
             .nest("/entry", gateway::entry::router())
-            .nest("/sharing", gateway::sharing::router())
-            .merge(gateway::proxy::router()),
+            .nest("/sharing", gateway::sharing::router()),
     }
     .layer(middleware::from_fn(
         gateway::middleware::reject_super_admin_on_user_paths,
