@@ -229,12 +229,12 @@ struct ListBudgetsQuery {
 #[derive(Deserialize)]
 struct AddMemberRequest {
     email: String,
-    role: Option<i32>,
+    role: Option<serde_json::Value>,
 }
 
 #[derive(Deserialize)]
 struct UpdateMemberRoleRequest {
-    role: i32,
+    role: serde_json::Value,
 }
 
 #[derive(Deserialize)]
@@ -396,7 +396,7 @@ async fn add_member(
             pb::AddBudgetMemberRequest {
                 budget_id,
                 user_id: body.email,
-                role: body.role.unwrap_or(4), // Viewer default
+                role: parse_budget_role(body.role.as_ref()),
             },
         )?)
         .await
@@ -421,7 +421,7 @@ async fn update_member_role(
             pb::UpdateBudgetMemberRoleRequest {
                 budget_id,
                 user_id,
-                role: body.role,
+                role: parse_budget_role(Some(&body.role)),
             },
         )?)
         .await
@@ -785,16 +785,28 @@ async fn list_price_snapshots(
 
 fn map_budget(budget: Option<&pb::Budget>) -> serde_json::Value {
     budget.map_or(serde_json::Value::Null, |b| {
-        let base = b.base.as_ref();
         serde_json::json!({
-            "id":          base.map(|x| &x.id).map_or("", |s| s),
+            "base": map_base(b.base.as_ref()),
             "org_id":      b.org_id,
             "name":        b.name,
             "budget_type": b.budget_type,
             "currency":    b.currency,
             "my_role":     b.my_role,
-            "created_at":  base.map(|x| x.created_at).unwrap_or(0),
-            "updated_at":  base.map(|x| x.updated_at).unwrap_or(0),
+        })
+    })
+}
+
+fn map_base(base: Option<&crate::pb::common::base::Base>) -> serde_json::Value {
+    base.map_or(serde_json::Value::Null, |b| {
+        serde_json::json!({
+            "id": b.id,
+            "created_at": b.created_at,
+            "updated_at": b.updated_at,
+            "deleted_at": b.deleted_at,
+            "created_by": b.created_by,
+            "updated_by": b.updated_by,
+            "owner_id": b.owner_id,
+            "status": b.status,
         })
     })
 }
@@ -822,6 +834,21 @@ fn parse_budget_type(v: Option<&serde_json::Value>) -> i32 {
             _ => 1,
         },
         _ => 1,
+    }
+}
+
+/// Convert a budget_role value that may be a string ("owner") or integer (1) to proto i32.
+fn parse_budget_role(v: Option<&serde_json::Value>) -> i32 {
+    match v {
+        Some(serde_json::Value::Number(n)) => n.as_i64().unwrap_or(4) as i32,
+        Some(serde_json::Value::String(s)) => match s.as_str() {
+            "owner" => 1,
+            "manager" => 2,
+            "contributor" => 3,
+            "viewer" => 4,
+            _ => 4,
+        },
+        _ => 4,
     }
 }
 

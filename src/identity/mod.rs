@@ -275,37 +275,30 @@ fn map_user(user: Option<&crate::pb::shared::user::User>) -> serde_json::Value {
 }
 
 fn map_org_summary(org: &pb::OrganizationSummary) -> serde_json::Value {
-    let base = org.base.as_ref();
     serde_json::json!({
-        "id": base.map(|b| b.id.as_str()).unwrap_or_default(),
+        "base": map_base(org.base.as_ref()),
         "name": org.name,
         "role": org.role,
     })
 }
 
 fn map_organization(org: &crate::pb::shared::organization::Organization) -> serde_json::Value {
-    let base = org.base.as_ref();
     serde_json::json!({
-        "id": base.map(|b| b.id.as_str()).unwrap_or(""),
+        "base": map_base(org.base.as_ref()),
         "name": org.name,
-        "status": base.map(|b| b.status).unwrap_or(0),
-        "created_at": base.map(|b| b.created_at).unwrap_or(0),
-        "updated_at": base.map(|b| b.updated_at).unwrap_or(0),
     })
 }
 
 fn map_invitation(invitation: Option<&pb::OrganizationInvitation>) -> serde_json::Value {
     invitation.map_or(serde_json::Value::Null, |i| {
-        let base = i.base.as_ref();
         serde_json::json!({
-            "id": base.map(|b| b.id.as_str()).unwrap_or_default(),
+            "base": map_base(i.base.as_ref()),
             "org_id": i.org_id,
             "inviter_id": i.inviter_id,
             "invitee_email": i.invitee_email,
             "org_role": i.org_role,
             "status": i.status,
             "expires_at": i.expires_at,
-            "created_at": base.map(|b| b.created_at).unwrap_or(0),
         })
     })
 }
