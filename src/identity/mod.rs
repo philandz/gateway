@@ -608,6 +608,7 @@ async fn list_org_invitations_proxy(
     Path(org_id): Path<String>,
     headers: HeaderMap,
 ) -> ApiResult<Response> {
+    // Proxy to identity REST server
     let uri = format!("{}/organizations/{}/invitations", state.identity_url, org_id);
     proxy_request(&state, &headers, &uri).await
 }
