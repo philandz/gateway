@@ -817,6 +817,7 @@ fn map_member(member: &pb::BudgetMember) -> serde_json::Value {
         "user_id":      member.user_id,
         "display_name": member.display_name,
         "email":        member.email,
+        "avatar":       if member.avatar.is_empty() { serde_json::Value::Null } else { serde_json::Value::String(member.avatar.clone()) },
         "role":         member.role,
     })
 }
