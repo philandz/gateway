@@ -228,7 +228,7 @@ struct ListBudgetsQuery {
 
 #[derive(Deserialize)]
 struct AddMemberRequest {
-    email: String,
+    user_id: String,
     role: Option<serde_json::Value>,
 }
 
@@ -395,7 +395,7 @@ async fn add_member(
             &headers,
             pb::AddBudgetMemberRequest {
                 budget_id,
-                user_id: body.email,
+                user_id: body.user_id,
                 role: parse_budget_role(body.role.as_ref()),
             },
         )?)
