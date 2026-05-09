@@ -137,7 +137,7 @@ jobs:
           set -euo pipefail
           version="${{ steps.version.outputs.version }}"
           image="${{ secrets.HARBOR_HOST }}/philand/gateway:${version}"
-          docker build -t "$image" .
+          docker build --no-cache -t "$image" .
           docker push "$image"
 
       - name: Update infra deploy manifest
