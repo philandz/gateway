@@ -230,6 +230,7 @@ struct OrgMemberResponse {
     user_id: String,
     email: String,
     display_name: String,
+    avatar: Option<String>,
     role: String,
     status: String,
     joined_at: i64,
@@ -574,6 +575,7 @@ async fn list_org_members(
             user_id: m.user_id,
             email: m.email,
             display_name: m.display_name,
+            avatar: if m.avatar.is_empty() { None } else { Some(m.avatar) },
             role: role_to_string(m.role),
             status: member_status_to_string(m.status),
             joined_at: m.joined_at,
@@ -613,7 +615,10 @@ async fn list_org_invitations_proxy(
     Path(org_id): Path<String>,
     headers: HeaderMap,
 ) -> ApiResult<Response> {
-    let uri = format!("{}/organizations/{}/invitations", state.identity_url, org_id);
+    let uri = format!(
+        "{}/organizations/{}/invitations",
+        state.identity_url, org_id
+    );
     proxy_request(&state, &headers, &uri).await
 }
 
@@ -938,31 +943,26 @@ async fn proxy_request(
         response_builder = response_builder.header(name.clone(), value.clone());
     }
 
-    let response_body = res
-        .bytes()
-        .await
-        .map_err(|_| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorResponse {
-                    code: "internal".to_string(),
-                    message: "Failed to read response body".to_string(),
-                    details: vec![],
-                }),
-            )
-        })?;
+    let response_body = res.bytes().await.map_err(|_| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                code: "internal".to_string(),
+                message: "Failed to read response body".to_string(),
+                details: vec![],
+            }),
+        )
+    })?;
     let body = Body::from(response_body);
 
-    response_builder
-        .body(body)
-        .map_err(|_| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorResponse {
-                    code: "internal".to_string(),
-                    message: "Failed to build response".to_string(),
-                    details: vec![],
-                }),
-            )
-        })
+    response_builder.body(body).map_err(|_| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                code: "internal".to_string(),
+                message: "Failed to build response".to_string(),
+                details: vec![],
+            }),
+        )
+    })
 }

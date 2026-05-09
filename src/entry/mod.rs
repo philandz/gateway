@@ -769,37 +769,66 @@ async fn list_split_legs(
 fn map_entry(e: &pb::Entry) -> serde_json::Value {
     let base = e.base.as_ref();
     serde_json::json!({
-        "id": base.map(|b| b.id.as_str()).unwrap_or_default(),
-        "budget_id": e.budget_id, "category_id": e.category_id,
-        "kind": e.kind, "amount": e.amount, "description": e.description,
-        "entry_date": e.entry_date, "tags": e.tags, "notes": e.notes,
-        "is_recurring": e.is_recurring, "has_attachment": e.has_attachment,
-        "recurrence_rule": e.recurrence_rule, "next_occurrence": e.next_occurrence,
-        "split_group_id": e.split_group_id, "split_total": e.split_total,
-        "created_by": base.map(|b| b.created_by.as_str()).unwrap_or_default(),
-        "created_at": base.map(|b| b.created_at).unwrap_or(0),
-        "updated_at": base.map(|b| b.updated_at).unwrap_or(0),
+        "base": base.map(|b| serde_json::json!({
+            "id": b.id.as_str(),
+            "created_at": b.created_at,
+            "updated_at": b.updated_at,
+            "deleted_at": b.deleted_at,
+            "created_by": b.created_by.as_str(),
+            "updated_by": b.updated_by.as_str(),
+            "owner_id": b.owner_id.as_str(),
+            "status": b.status,
+        })).unwrap_or(serde_json::Value::Null),
+        "budget_id": e.budget_id,
+        "category_id": e.category_id,
+        "kind": e.kind,
+        "amount": e.amount,
+        "description": e.description,
+        "entry_date": e.entry_date,
+        "tags": e.tags,
+        "notes": e.notes,
+        "is_recurring": e.is_recurring,
+        "has_attachment": e.has_attachment,
+        "recurrence_rule": e.recurrence_rule,
+        "next_occurrence": e.next_occurrence,
+        "split_group_id": e.split_group_id,
+        "split_total": e.split_total,
     })
 }
 
 fn map_comment(c: &pb::Comment) -> serde_json::Value {
     let base = c.base.as_ref();
     serde_json::json!({
-        "id": base.map(|b| b.id.as_str()).unwrap_or_default(),
-        "entry_id": c.entry_id, "body": c.body,
-        "created_by": base.map(|b| b.created_by.as_str()).unwrap_or_default(),
-        "created_at": base.map(|b| b.created_at).unwrap_or(0),
-        "updated_at": base.map(|b| b.updated_at).unwrap_or(0),
+        "base": base.map(|b| serde_json::json!({
+            "id": b.id.as_str(),
+            "created_at": b.created_at,
+            "updated_at": b.updated_at,
+            "deleted_at": b.deleted_at,
+            "created_by": b.created_by.as_str(),
+            "updated_by": b.updated_by.as_str(),
+            "owner_id": b.owner_id.as_str(),
+            "status": b.status,
+        })).unwrap_or(serde_json::Value::Null),
+        "entry_id": c.entry_id,
+        "body": c.body,
     })
 }
 
 fn map_attachment(a: &pb::Attachment) -> serde_json::Value {
     let base = a.base.as_ref();
     serde_json::json!({
-        "id": base.map(|b| b.id.as_str()).unwrap_or_default(),
-        "entry_id": a.entry_id, "file_id": a.file_id,
+        "base": base.map(|b| serde_json::json!({
+            "id": b.id.as_str(),
+            "created_at": b.created_at,
+            "updated_at": b.updated_at,
+            "deleted_at": b.deleted_at,
+            "created_by": b.created_by.as_str(),
+            "updated_by": b.updated_by.as_str(),
+            "owner_id": b.owner_id.as_str(),
+            "status": b.status,
+        })).unwrap_or(serde_json::Value::Null),
+        "entry_id": a.entry_id,
+        "file_id": a.file_id,
         "file_name": a.file_name,
-        "created_by": base.map(|b| b.created_by.as_str()).unwrap_or_default(),
-        "created_at": base.map(|b| b.created_at).unwrap_or(0),
     })
 }

@@ -228,7 +228,7 @@ struct ListBudgetsQuery {
 
 #[derive(Deserialize)]
 struct AddMemberRequest {
-    email: String,
+    user_id: String,
     role: Option<serde_json::Value>,
 }
 
@@ -395,7 +395,7 @@ async fn add_member(
             &headers,
             pb::AddBudgetMemberRequest {
                 budget_id,
-                user_id: body.email,
+                user_id: body.user_id,
                 role: parse_budget_role(body.role.as_ref()),
             },
         )?)
@@ -817,6 +817,7 @@ fn map_member(member: &pb::BudgetMember) -> serde_json::Value {
         "user_id":      member.user_id,
         "display_name": member.display_name,
         "email":        member.email,
+        "avatar":       if member.avatar.is_empty() { serde_json::Value::Null } else { serde_json::Value::String(member.avatar.clone()) },
         "role":         member.role,
     })
 }
