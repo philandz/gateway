@@ -278,6 +278,7 @@ async fn calculate_settlement(
                 "to_name":      t.to_name,
                 "amount":       t.amount,
                 "deep_link":    t.deep_link,
+                "payment_url":  t.payment_url,
             })
         })
         .collect();
