@@ -397,6 +397,7 @@ async fn add_member(
                 budget_id,
                 user_id: body.user_id,
                 role: parse_budget_role(body.role.as_ref()),
+                system_actor: false,
             },
         )?)
         .await
