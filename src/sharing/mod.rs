@@ -160,6 +160,8 @@ struct AddExpenseRequest {
 struct LegBody {
     user_id: String,
     amount: i64,
+    #[serde(default)]
+    weight: i64,
 }
 
 #[derive(Deserialize)]
@@ -185,6 +187,7 @@ async fn add_expense(
         .map(|l| pb::ExpenseLeg {
             user_id: l.user_id,
             amount: l.amount,
+            weight: l.weight,
         })
         .collect();
     let resp = c
@@ -277,8 +280,6 @@ async fn calculate_settlement(
                 "to_user_id":   t.to_user_id,
                 "to_name":      t.to_name,
                 "amount":       t.amount,
-                "deep_link":    t.deep_link,
-                "payment_url":  t.payment_url,
             })
         })
         .collect();
@@ -330,6 +331,7 @@ async fn accept_join_link(
         pb::AcceptJoinLinkRequest {
             token: body.token,
             user_id,
+            display_name: String::new(),
         },
     )?)
     .await
