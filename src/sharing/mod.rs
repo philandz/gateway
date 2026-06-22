@@ -188,6 +188,7 @@ async fn add_expense(
             user_id: l.user_id,
             amount: l.amount,
             weight: l.weight,
+            share: 0,
         })
         .collect();
     let resp = c
@@ -202,6 +203,8 @@ async fn add_expense(
                 category_id: body.category_id.unwrap_or_default(),
                 split_method: body.split_method.unwrap_or(1),
                 legs,
+                items: vec![],
+                receipt_media_id: String::new(),
             },
         )?)
         .await
