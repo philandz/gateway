@@ -90,6 +90,8 @@ dependencies = [
  "http 1.4.0",
  "http-body",
  "http-body-util",
+ "hyper",
+ "hyper-util",
  "itoa",
  "matchit 0.7.3",
  "memchr",
@@ -98,10 +100,15 @@ dependencies = [
  "pin-project-lite",
  "rustversion",
  "serde",
+ "serde_json",
+ "serde_path_to_error",
+ "serde_urlencoded",
  "sync_wrapper",
+ "tokio",
  "tower 0.5.3",
  "tower-layer",
  "tower-service",
+ "tracing",
 ]
 
 [[package]]
@@ -155,6 +162,7 @@ dependencies = [
  "sync_wrapper",
  "tower-layer",
  "tower-service",
+ "tracing",
 ]
 
 [[package]]
@@ -369,7 +377,7 @@ dependencies = [
 name = "error"
 version = "0.1.0"
 dependencies = [
- "axum 0.8.8",
+ "axum 0.7.9",
  "serde",
  "thiserror 2.0.18",
  "tonic",
