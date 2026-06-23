@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
-    routing::{get, post},
+    routing::{delete, get, post},
     Json, Router,
 };
 use serde::Deserialize;
@@ -29,6 +29,20 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/budgets/{budget_id}/settlement", get(calculate_settlement))
         .route("/budgets/{budget_id}/join-link", post(generate_join_link))
         .route("/join-link/accept", post(accept_join_link))
+        // --- Guest join ---
+        .route("/join-link/preview", post(preview_join_link))
+        .route("/join-link/accept-guest", post(join_as_guest))
+        // --- Comments ---
+        .route("/expenses/{expense_id}/comments", get(list_comments).post(add_comment))
+        .route("/comments/{comment_id}", delete(delete_comment))
+        // --- Activity ---
+        .route("/budgets/{budget_id}/activity", get(list_activity))
+        // --- Settlements ---
+        .route("/budgets/{budget_id}/settlements", get(list_settlements).post(mark_settled))
+        .route("/settlements/{confirmation_id}", delete(delete_settlement))
+        // --- Participants ---
+        .route("/budgets/{budget_id}/participants", get(list_participants))
+        .route("/budgets/{budget_id}/participants/{participant_id}", delete(revoke_participant))
 }
 
 fn map_status(s: Status) -> (StatusCode, Json<ErrorResponse>) {
@@ -54,6 +68,32 @@ fn with_user<T>(headers: &HeaderMap, req: T) -> ApiResult<GrpcRequest<T>> {
     if let Some(uid) = extract_sub(auth) {
         if let Ok(v) = MetadataValue::try_from(uid.as_str()) {
             grpc_req.metadata_mut().insert("x-user-id", v);
+        }
+    }
+    Ok(grpc_req)
+}
+
+fn with_user_or_guest<T>(headers: &HeaderMap, req: T) -> ApiResult<GrpcRequest<T>> {
+    let auth = headers
+        .get("authorization")
+        .and_then(|v| v.to_str().ok())
+        .ok_or_else(|| map_status(Status::unauthenticated("Missing Authorization header")))?;
+    let mut grpc_req = GrpcRequest::new(req);
+    if auth.starts_with("SharingSession ") {
+        // Guest auth
+        let token = auth.strip_prefix("SharingSession ").unwrap().trim();
+        if let Ok(v) = MetadataValue::try_from(token) {
+            grpc_req.metadata_mut().insert("x-session-token", v);
+        }
+    } else {
+        // Member JWT auth
+        let value = MetadataValue::try_from(auth)
+            .map_err(|_| map_status(Status::unauthenticated("Invalid Authorization header")))?;
+        grpc_req.metadata_mut().insert("authorization", value);
+        if let Some(uid) = extract_sub(auth) {
+            if let Ok(v) = MetadataValue::try_from(uid.as_str()) {
+                grpc_req.metadata_mut().insert("x-user-id", v);
+            }
         }
     }
     Ok(grpc_req)
@@ -167,6 +207,32 @@ struct LegBody {
 #[derive(Deserialize)]
 struct AcceptJoinLinkBody {
     token: String,
+}
+
+#[derive(Deserialize)]
+struct JoinAsGuestBody {
+    token: String,
+    display_name: String,
+}
+
+#[derive(Deserialize)]
+struct AddCommentBody {
+    body: String,
+}
+
+#[derive(Deserialize)]
+struct MarkSettledBody {
+    from_participant_id: String,
+    to_participant_id: String,
+    amount: i64,
+    settled_at: String,
+    note: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct ActivityQuery {
+    since: Option<i64>,
+    limit: Option<i32>,
 }
 
 // ---------------------------------------------------------------------------
@@ -345,6 +411,303 @@ async fn accept_join_link(
 }
 
 // ---------------------------------------------------------------------------
+// Guest join
+// ---------------------------------------------------------------------------
+
+async fn preview_join_link(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<serde_json::Value>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let token = body
+        .get("token")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| map_status(Status::invalid_argument("token is required")))?;
+    let mut c = client(&state).await?;
+    let resp = c
+        .preview_join_link(GrpcRequest::new(pb::PreviewJoinLinkRequest {
+            token: token.to_string(),
+        }))
+        .await
+        .map_err(map_status)?
+        .into_inner();
+    Ok(Json(serde_json::json!({
+        "budget_id":    resp.budget_id,
+        "currency":     resp.currency,
+        "expires_at":   resp.expires_at,
+        "member_count": resp.member_count,
+        "valid":        resp.valid,
+    })))
+}
+
+async fn join_as_guest(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<JoinAsGuestBody>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let mut c = client(&state).await?;
+    let resp = c
+        .join_as_guest(GrpcRequest::new(pb::JoinAsGuestRequest {
+            token: body.token.clone(),
+            display_name: body.display_name.clone(),
+        }))
+        .await
+        .map_err(map_status)?
+        .into_inner();
+    Ok(Json(serde_json::json!({
+        "session_token":  resp.session_token,
+        "participant_id": resp.participant_id,
+        "budget_id":      resp.budget_id,
+        "display_name":   resp.display_name,
+    })))
+}
+
+// ---------------------------------------------------------------------------
+// Comments
+// ---------------------------------------------------------------------------
+
+async fn add_comment(
+    State(state): State<Arc<AppState>>,
+    Path(expense_id): Path<String>,
+    headers: HeaderMap,
+    Json(body): Json<AddCommentBody>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let mut c = client(&state).await?;
+    let resp = c
+        .add_comment(with_user_or_guest(
+            &headers,
+            pb::AddCommentRequest {
+                expense_id,
+                body: body.body,
+            },
+        )?)
+        .await
+        .map_err(map_status)?
+        .into_inner();
+    Ok(Json(serde_json::json!({ "comment": map_comment(resp.comment.as_ref()) })))
+}
+
+async fn list_comments(
+    State(state): State<Arc<AppState>>,
+    Path(expense_id): Path<String>,
+    headers: HeaderMap,
+) -> ApiResult<Json<serde_json::Value>> {
+    let mut c = client(&state).await?;
+    let resp = c
+        .list_comments(with_user_or_guest(
+            &headers,
+            pb::ListCommentsRequest { expense_id },
+        )?)
+        .await
+        .map_err(map_status)?
+        .into_inner();
+    let comments: Vec<serde_json::Value> = resp
+        .comments
+        .iter()
+        .map(|c| map_comment(Some(c)))
+        .collect();
+    Ok(Json(serde_json::json!({ "comments": comments })))
+}
+
+async fn delete_comment(
+    State(state): State<Arc<AppState>>,
+    Path(comment_id): Path<String>,
+    headers: HeaderMap,
+) -> ApiResult<Json<serde_json::Value>> {
+    let mut c = client(&state).await?;
+    c.delete_comment(with_user_or_guest(
+        &headers,
+        pb::DeleteCommentRequest { comment_id },
+    )?)
+    .await
+    .map_err(map_status)?;
+    Ok(Json(serde_json::json!({ "success": true })))
+}
+
+// ---------------------------------------------------------------------------
+// Activity
+// ---------------------------------------------------------------------------
+
+async fn list_activity(
+    State(state): State<Arc<AppState>>,
+    Path(budget_id): Path<String>,
+    headers: HeaderMap,
+    Query(params): Query<ActivityQuery>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let mut c = client(&state).await?;
+    let resp = c
+        .list_activity(with_user(
+            &headers,
+            pb::ListActivityRequest {
+                budget_id,
+                since_unix: params.since.unwrap_or(0),
+                limit: params.limit.unwrap_or(50),
+            },
+        )?)
+        .await
+        .map_err(map_status)?
+        .into_inner();
+    let entries: Vec<serde_json::Value> = resp
+        .entries
+        .iter()
+        .map(|e| {
+            serde_json::json!({
+                "id":                    e.id,
+                "budget_id":             e.budget_id,
+                "actor_participant_id":  e.actor_participant_id,
+                "actor_display_name":    e.actor_display_name,
+                "action":                e.action,
+                "target_type":           e.target_type,
+                "target_id":             e.target_id,
+                "metadata_json":         e.metadata_json,
+                "created_at":            e.created_at,
+            })
+        })
+        .collect();
+    Ok(Json(serde_json::json!({ "entries": entries })))
+}
+
+// ---------------------------------------------------------------------------
+// Settlements
+// ---------------------------------------------------------------------------
+
+async fn list_settlements(
+    State(state): State<Arc<AppState>>,
+    Path(budget_id): Path<String>,
+    headers: HeaderMap,
+) -> ApiResult<Json<serde_json::Value>> {
+    let mut c = client(&state).await?;
+    let resp = c
+        .list_settlements(with_user_or_guest(
+            &headers,
+            pb::ListSettlementsRequest { budget_id },
+        )?)
+        .await
+        .map_err(map_status)?
+        .into_inner();
+    let confirmations: Vec<serde_json::Value> = resp
+        .confirmations
+        .iter()
+        .map(|s| {
+            serde_json::json!({
+                "id":                       s.id,
+                "budget_id":                s.budget_id,
+                "from_participant_id":      s.from_participant_id,
+                "to_participant_id":        s.to_participant_id,
+                "amount":                   s.amount,
+                "settled_at":               s.settled_at,
+                "note":                     s.note,
+                "settled_by_participant_id": s.settled_by_participant_id,
+                "created_at":               s.created_at,
+            })
+        })
+        .collect();
+    Ok(Json(serde_json::json!({ "confirmations": confirmations })))
+}
+
+async fn mark_settled(
+    State(state): State<Arc<AppState>>,
+    Path(budget_id): Path<String>,
+    headers: HeaderMap,
+    Json(body): Json<MarkSettledBody>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let mut c = client(&state).await?;
+    let resp = c
+        .mark_settled(with_user_or_guest(
+            &headers,
+            pb::MarkSettledRequest {
+                budget_id,
+                from_participant_id: body.from_participant_id,
+                to_participant_id: body.to_participant_id,
+                amount: body.amount,
+                settled_at: body.settled_at,
+                note: body.note.unwrap_or_default(),
+            },
+        )?)
+        .await
+        .map_err(map_status)?
+        .into_inner();
+    Ok(Json(serde_json::json!({
+        "id":                       resp.id,
+        "budget_id":                resp.budget_id,
+        "from_participant_id":      resp.from_participant_id,
+        "to_participant_id":        resp.to_participant_id,
+        "amount":                   resp.amount,
+        "settled_at":               resp.settled_at,
+        "note":                     resp.note,
+        "settled_by_participant_id": resp.settled_by_participant_id,
+        "created_at":               resp.created_at,
+    })))
+}
+
+async fn delete_settlement(
+    State(state): State<Arc<AppState>>,
+    Path(confirmation_id): Path<String>,
+    headers: HeaderMap,
+) -> ApiResult<Json<serde_json::Value>> {
+    let mut c = client(&state).await?;
+    c.delete_settlement(with_user(
+        &headers,
+        pb::DeleteSettlementRequest { confirmation_id },
+    )?)
+    .await
+    .map_err(map_status)?;
+    Ok(Json(serde_json::json!({ "success": true })))
+}
+
+// ---------------------------------------------------------------------------
+// Participants
+// ---------------------------------------------------------------------------
+
+async fn list_participants(
+    State(state): State<Arc<AppState>>,
+    Path(budget_id): Path<String>,
+    headers: HeaderMap,
+) -> ApiResult<Json<serde_json::Value>> {
+    let mut c = client(&state).await?;
+    let resp = c
+        .list_participants(with_user(
+            &headers,
+            pb::ListParticipantsRequest { budget_id },
+        )?)
+        .await
+        .map_err(map_status)?
+        .into_inner();
+    let participants: Vec<serde_json::Value> = resp
+        .participants
+        .iter()
+        .map(|p| {
+            serde_json::json!({
+                "participant_id": p.participant_id,
+                "budget_id":      p.budget_id,
+                "kind":           p.kind,
+                "display_name":   p.display_name,
+                "joined_at":      p.joined_at,
+                "last_seen_at":   p.last_seen_at,
+                "revoked":        p.revoked,
+            })
+        })
+        .collect();
+    Ok(Json(serde_json::json!({ "participants": participants })))
+}
+
+async fn revoke_participant(
+    State(state): State<Arc<AppState>>,
+    Path((budget_id, participant_id)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> ApiResult<Json<serde_json::Value>> {
+    let mut c = client(&state).await?;
+    c.revoke_participant(with_user(
+        &headers,
+        pb::RevokeParticipantRequest {
+            budget_id,
+            participant_id,
+        },
+    )?)
+    .await
+    .map_err(map_status)?;
+    Ok(Json(serde_json::json!({ "success": true })))
+}
+
+// ---------------------------------------------------------------------------
 // Mapper
 // ---------------------------------------------------------------------------
 
@@ -367,4 +730,19 @@ fn map_expense(e: &pb::Expense) -> serde_json::Value {
         "created_at":   base.map(|b| b.created_at).unwrap_or(0),
         "updated_at":   base.map(|b| b.updated_at).unwrap_or(0),
     })
+}
+
+fn map_comment(c: Option<&pb::ExpenseComment>) -> serde_json::Value {
+    match c {
+        Some(c) => serde_json::json!({
+            "id":                    c.id,
+            "expense_id":            c.expense_id,
+            "author_participant_id": c.author_participant_id,
+            "author_display_name":   c.author_display_name,
+            "body":                  c.body,
+            "created_at":            c.created_at,
+            "deleted":               c.deleted,
+        }),
+        None => serde_json::json!({}),
+    }
 }
