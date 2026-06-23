@@ -194,6 +194,10 @@ struct AddExpenseRequest {
     category_id: Option<String>,
     split_method: Option<i32>,
     legs: Option<Vec<LegBody>>,
+    #[serde(default)]
+    items: Vec<ItemBody>,
+    #[serde(default)]
+    receipt_media_id: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -202,6 +206,21 @@ struct LegBody {
     amount: i64,
     #[serde(default)]
     weight: i64,
+}
+
+#[derive(Deserialize)]
+struct AssignmentBody {
+    user_id: String,
+    #[serde(default)]
+    numerator: i32,
+}
+
+#[derive(Deserialize)]
+struct ItemBody {
+    label: String,
+    amount: i64,
+    #[serde(default)]
+    assignments: Vec<AssignmentBody>,
 }
 
 #[derive(Deserialize)]
@@ -257,8 +276,28 @@ async fn add_expense(
             share: 0,
         })
         .collect();
+    let items: Vec<pb::ExpenseItem> = body
+        .items
+        .into_iter()
+        .map(|it| pb::ExpenseItem {
+            id: String::new(),
+            expense_id: String::new(),
+            label: it.label,
+            amount: it.amount,
+            assignments: it
+                .assignments
+                .into_iter()
+                .map(|a| pb::ItemAssignment {
+                    user_id: a.user_id,
+                    numerator: a.numerator,
+                    resolved_amount: 0,
+                })
+                .collect(),
+        })
+        .collect();
+
     let resp = c
-        .add_expense(with_user(
+        .add_expense(with_user_or_guest(
             &headers,
             pb::AddExpenseRequest {
                 budget_id,
@@ -269,8 +308,8 @@ async fn add_expense(
                 category_id: body.category_id.unwrap_or_default(),
                 split_method: body.split_method.unwrap_or(1),
                 legs,
-                items: vec![],
-                receipt_media_id: String::new(),
+                items,
+                receipt_media_id: body.receipt_media_id.unwrap_or_default(),
             },
         )?)
         .await
