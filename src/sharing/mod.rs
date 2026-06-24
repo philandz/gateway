@@ -33,16 +33,25 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/join-link/preview", post(preview_join_link))
         .route("/join-link/accept-guest", post(join_as_guest))
         // --- Comments ---
-        .route("/expenses/{expense_id}/comments", get(list_comments).post(add_comment))
+        .route(
+            "/expenses/{expense_id}/comments",
+            get(list_comments).post(add_comment),
+        )
         .route("/comments/{comment_id}", delete(delete_comment))
         // --- Activity ---
         .route("/budgets/{budget_id}/activity", get(list_activity))
         // --- Settlements ---
-        .route("/budgets/{budget_id}/settlements", get(list_settlements).post(mark_settled))
+        .route(
+            "/budgets/{budget_id}/settlements",
+            get(list_settlements).post(mark_settled),
+        )
         .route("/settlements/{confirmation_id}", delete(delete_settlement))
         // --- Participants ---
         .route("/budgets/{budget_id}/participants", get(list_participants))
-        .route("/budgets/{budget_id}/participants/{participant_id}", delete(revoke_participant))
+        .route(
+            "/budgets/{budget_id}/participants/{participant_id}",
+            delete(revoke_participant),
+        )
 }
 
 fn map_status(s: Status) -> (StatusCode, Json<ErrorResponse>) {
@@ -99,6 +108,27 @@ fn with_user_or_guest<T>(headers: &HeaderMap, req: T) -> ApiResult<GrpcRequest<T
     Ok(grpc_req)
 }
 
+/// Decode the `sub` claim from a JWT bearer token.
+///
+/// This is the gateway's ONLY source of `x-user-id` metadata for the
+/// sharing service — every authenticated-member request routes through
+/// here. The decoded `sub` is forwarded to the backend as the acting
+/// user_id, so a bug here directly compromises per-user authorization.
+///
+/// SECURITY NOTES
+/// - We do NOT verify the JWT signature in the gateway: the identity
+///   service is the source of truth and verifies the token on every
+///   request via the `authorization` metadata. This function only
+///   *reads* the unverified payload to forward the user id alongside
+///   the token, so a forged `sub` would be caught by the identity
+///   gRPC handler returning Unauthenticated before the sharing
+///   service ever sees the request.
+/// - We do NOT trust the `sub` value at face value in the gateway —
+///   the sharing service re-resolves it server-side.
+/// - `base64url_decode` below is shared by 4 other modules (category,
+///   entry, budget, middleware). Consolidating it is out of scope for
+///   this engagement; this copy is the security-sensitive one and
+///   is intentionally well-commented (Bug 4).
 fn extract_sub(bearer: &str) -> Option<String> {
     let token = bearer.strip_prefix("Bearer ")?;
     let payload = token.split('.').nth(1)?;
@@ -110,6 +140,19 @@ fn extract_sub(bearer: &str) -> Option<String> {
         .map(|s| s.to_string())
 }
 
+/// RFC 4648 §5 base64url decoder used by `extract_sub`.
+///
+/// This is a hand-rolled decoder. It is duplicated in
+/// `gateway/src/{category,entry,budget}/mod.rs` and
+/// `gateway/src/middleware/mod.rs` — a 5x duplication flagged in Bug 4.
+/// Full consolidation is out of scope; this copy stays as-is, but the
+/// intent is for a future `libs/crypto` or `libs/jwt` crate to own a
+/// single tested implementation. Until then, edits here must be
+/// mirrored in the other four locations.
+///
+/// Returns `None` on any malformed input (bad char, bad padding,
+/// truncated quartet). Does NOT allocate on failure beyond the
+/// fixed-size `T` lookup table.
 fn base64url_decode(input: &str) -> Option<Vec<u8>> {
     let mut s = input.replace('-', "+").replace('_', "/");
     match s.len() % 4 {
@@ -325,7 +368,10 @@ async fn get_expense(
 ) -> ApiResult<Json<serde_json::Value>> {
     let mut c = client(&state).await?;
     let resp = c
-        .get_expense(with_user_or_guest(&headers, pb::GetExpenseRequest { expense_id })?)
+        .get_expense(with_user_or_guest(
+            &headers,
+            pb::GetExpenseRequest { expense_id },
+        )?)
         .await
         .map_err(map_status)?
         .into_inner();
@@ -341,7 +387,10 @@ async fn list_expenses(
 ) -> ApiResult<Json<serde_json::Value>> {
     let mut c = client(&state).await?;
     let resp = c
-        .list_expenses(with_user_or_guest(&headers, pb::ListExpensesRequest { budget_id })?)
+        .list_expenses(with_user_or_guest(
+            &headers,
+            pb::ListExpensesRequest { budget_id },
+        )?)
         .await
         .map_err(map_status)?
         .into_inner();
@@ -427,13 +476,19 @@ async fn accept_join_link(
     Json(body): Json<AcceptJoinLinkBody>,
 ) -> ApiResult<Json<serde_json::Value>> {
     let mut c = client(&state).await?;
-    let user_id = extract_sub(
-        headers
-            .get("authorization")
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or(""),
-    )
-    .unwrap_or_default();
+    // `accept_join_link` is the authenticated-member path: the caller must
+    // present a valid JWT. We need the `sub` claim to bind the new participant
+    // to the existing user. Reject malformed/missing tokens here rather than
+    // forwarding an empty `user_id` to the backend (Bug 1).
+    let user_id = headers
+        .get("authorization")
+        .and_then(|v| v.to_str().ok())
+        .and_then(extract_sub)
+        .ok_or_else(|| {
+            map_status(Status::unauthenticated(
+                "Invalid or missing JWT for accept_join_link",
+            ))
+        })?;
     c.accept_join_link(with_user(
         &headers,
         pb::AcceptJoinLinkRequest {
@@ -521,7 +576,9 @@ async fn add_comment(
         .await
         .map_err(map_status)?
         .into_inner();
-    Ok(Json(serde_json::json!({ "comment": map_comment(resp.comment.as_ref()) })))
+    Ok(Json(
+        serde_json::json!({ "comment": map_comment(resp.comment.as_ref()) }),
+    ))
 }
 
 async fn list_comments(
@@ -538,11 +595,8 @@ async fn list_comments(
         .await
         .map_err(map_status)?
         .into_inner();
-    let comments: Vec<serde_json::Value> = resp
-        .comments
-        .iter()
-        .map(|c| map_comment(Some(c)))
-        .collect();
+    let comments: Vec<serde_json::Value> =
+        resp.comments.iter().map(|c| map_comment(Some(c))).collect();
     Ok(Json(serde_json::json!({ "comments": comments })))
 }
 
@@ -649,6 +703,13 @@ async fn mark_settled(
     Json(body): Json<MarkSettledBody>,
 ) -> ApiResult<Json<serde_json::Value>> {
     let mut c = client(&state).await?;
+    // TODO(decision): `with_user_or_guest` allows a guest session token to
+    // call this endpoint. The spec is unambiguous: `infra/.ai/spec/08-sharing-budget.md`
+    // §2.5 row "Mark a settlement as settled" grants ✅ to both Member and Guest.
+    // If the product team reverses this decision, switch the call below to
+    // `with_user` so only JWT-authenticated members can settle. Do not also
+    // remove the `with_user_or_guest` machinery from the other endpoints
+    // (add_expense / add_comment) without re-reading the full §2.5 table.
     let resp = c
         .mark_settled(with_user_or_guest(
             &headers,
@@ -722,6 +783,7 @@ async fn list_participants(
                 "joined_at":      p.joined_at,
                 "last_seen_at":   p.last_seen_at,
                 "revoked":        p.revoked,
+                "user_id":        p.user_id,
             })
         })
         .collect();
