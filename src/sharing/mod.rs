@@ -325,7 +325,7 @@ async fn get_expense(
 ) -> ApiResult<Json<serde_json::Value>> {
     let mut c = client(&state).await?;
     let resp = c
-        .get_expense(with_user(&headers, pb::GetExpenseRequest { expense_id })?)
+        .get_expense(with_user_or_guest(&headers, pb::GetExpenseRequest { expense_id })?)
         .await
         .map_err(map_status)?
         .into_inner();
@@ -341,7 +341,7 @@ async fn list_expenses(
 ) -> ApiResult<Json<serde_json::Value>> {
     let mut c = client(&state).await?;
     let resp = c
-        .list_expenses(with_user(&headers, pb::ListExpensesRequest { budget_id })?)
+        .list_expenses(with_user_or_guest(&headers, pb::ListExpensesRequest { budget_id })?)
         .await
         .map_err(map_status)?
         .into_inner();
@@ -355,7 +355,7 @@ async fn delete_expense(
     headers: HeaderMap,
 ) -> ApiResult<Json<serde_json::Value>> {
     let mut c = client(&state).await?;
-    c.delete_expense(with_user(
+    c.delete_expense(with_user_or_guest(
         &headers,
         pb::DeleteExpenseRequest { expense_id },
     )?)
@@ -371,7 +371,7 @@ async fn calculate_settlement(
 ) -> ApiResult<Json<serde_json::Value>> {
     let mut c = client(&state).await?;
     let resp = c
-        .calculate_settlement(with_user(
+        .calculate_settlement(with_user_or_guest(
             &headers,
             pb::CalculateSettlementRequest { budget_id },
         )?)
@@ -573,7 +573,7 @@ async fn list_activity(
 ) -> ApiResult<Json<serde_json::Value>> {
     let mut c = client(&state).await?;
     let resp = c
-        .list_activity(with_user(
+        .list_activity(with_user_or_guest(
             &headers,
             pb::ListActivityRequest {
                 budget_id,
@@ -703,7 +703,7 @@ async fn list_participants(
 ) -> ApiResult<Json<serde_json::Value>> {
     let mut c = client(&state).await?;
     let resp = c
-        .list_participants(with_user(
+        .list_participants(with_user_or_guest(
             &headers,
             pb::ListParticipantsRequest { budget_id },
         )?)
