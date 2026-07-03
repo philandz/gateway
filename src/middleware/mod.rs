@@ -1,17 +1,38 @@
 use axum::{extract::Request, http::StatusCode, middleware::Next, response::Response, Json};
 
+/// Paths that super admin is explicitly allowed to call. Everything else
+/// under `/api/` is rejected so a super-admin token can't accidentally
+/// reach a per-org endpoint that expects an `org_id` claim.
+///
+/// Three sources of allowed paths today:
+///   - `/api/identity/*` — identity-service admin endpoints
+///   - `/api/admin/*` — reserved for a future admin router
+///   - `/api/budget/budgets/admin` (and other budget/admin paths) — super-admin
+///     platform-wide budget view (lives under the budget service because
+///     that's where the ListBudgetsAdmin RPC lives).
+fn is_super_admin_allowed_path(path: &str) -> bool {
+    if path.starts_with("/api/identity/") || path.starts_with("/api/admin/") {
+        return true;
+    }
+    // Budget-service admin paths — explicit list so we never accidentally
+    // expose a per-org endpoint to super_admin.
+    matches!(
+        path,
+        "/api/budget/budgets/admin"
+            | "/api/budget/members/admin"
+            | "/api/budget/templates/admin"
+    )
+}
+
 /// Rejects Super Admin JWTs on non-admin paths.
-/// Super Admins must use /api/identity/* (admin endpoints) only.
+/// Super Admins must use `/api/identity/*` or the explicit admin paths above.
 pub async fn reject_super_admin_on_user_paths(
     request: Request,
     next: Next,
 ) -> Result<Response, (StatusCode, Json<serde_json::Value>)> {
     let path = request.uri().path().to_string();
 
-    // Only apply to /api/* paths that are NOT identity (admin endpoints live there)
-    let is_user_path = path.starts_with("/api/")
-        && !path.starts_with("/api/identity/")
-        && !path.starts_with("/api/admin/");
+    let is_user_path = path.starts_with("/api/") && !is_super_admin_allowed_path(&path);
 
     if is_user_path {
         if let Some(auth) = request
