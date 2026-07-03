@@ -43,6 +43,8 @@ pub fn router() -> Router<Arc<AppState>> {
             put(set_rollover_policy).get(get_rollover_policy),
         )
         .route("/templates", get(list_templates))
+        // Super-admin: list every budget across every org (platform-wide view).
+        .route("/budgets/admin", get(list_budgets_admin))
         // Invest assets
         .route(
             "/budgets/{budget_id}/invest/assets",
@@ -363,6 +365,45 @@ async fn list_budgets(
     let budgets: Vec<serde_json::Value> =
         resp.budgets.iter().map(|b| map_budget(Some(b))).collect();
     Ok(Json(serde_json::json!({"budgets": budgets})))
+}
+
+// -- Super-admin: list every budget across every org ------------------------
+
+#[derive(serde::Deserialize, Default)]
+struct ListBudgetsAdminQuery {
+    org_id: Option<String>,
+    budget_type: Option<String>,
+    name_search: Option<String>,
+    page: Option<i32>,
+    page_size: Option<i32>,
+}
+
+async fn list_budgets_admin(
+    State(state): State<Arc<AppState>>,
+    Query(params): Query<ListBudgetsAdminQuery>,
+    headers: HeaderMap,
+) -> ApiResult<Json<serde_json::Value>> {
+    let mut c = client(&state).await?;
+    let resp = c
+        .list_budgets_admin(with_user(
+            &headers,
+            pb::ListBudgetsAdminRequest {
+                org_id: params.org_id.unwrap_or_default(),
+                budget_type: params.budget_type.unwrap_or_default(),
+                name_search: params.name_search.unwrap_or_default(),
+                page: params.page.unwrap_or(1),
+                page_size: params.page_size.unwrap_or(20),
+            },
+        )?)
+        .await
+        .map_err(map_status)?
+        .into_inner();
+    let budgets: Vec<serde_json::Value> =
+        resp.budgets.iter().map(|b| map_budget(Some(b))).collect();
+    Ok(Json(serde_json::json!({
+        "budgets": budgets,
+        "total": resp.total,
+    })))
 }
 
 async fn list_members(
@@ -787,12 +828,16 @@ async fn list_price_snapshots(
 fn map_budget(budget: Option<&pb::Budget>) -> serde_json::Value {
     budget.map_or(serde_json::Value::Null, |b| {
         serde_json::json!({
-            "base": map_base(b.base.as_ref()),
-            "org_id":      b.org_id,
-            "name":        b.name,
-            "budget_type": b.budget_type,
-            "currency":    b.currency,
-            "my_role":     b.my_role,
+            "base":          map_base(b.base.as_ref()),
+            "org_id":        b.org_id,
+            "name":          b.name,
+            "budget_type":   b.budget_type,
+            "currency":      b.currency,
+            "my_role":       b.my_role,
+            "envelope_limit": b.envelope_limit,
+            "current_spend":  b.current_spend,
+            "burn_rate_pct":  b.burn_rate_pct,
+            "member_count":   b.member_count,
         })
     })
 }
