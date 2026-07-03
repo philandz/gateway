@@ -71,6 +71,12 @@ pub fn router() -> Router<Arc<AppState>> {
         )
         // Google SSO
         .route("/login/google", post(login_google))
+        // Logged-in password change (mandatory email OTP step)
+        .route("/password/request-otp", post(request_password_change_otp))
+        .route("/password/confirm-otp", post(confirm_password_change_otp))
+        // Super-admin platform settings (mail provider)
+        .route("/settings/resend", get(get_resend_config).patch(update_resend_config))
+        .route("/settings/resend/test", post(test_resend_config))
 }
 
 async fn test_get_handler() -> ApiResult<Json<serde_json::Value>> {
@@ -500,6 +506,145 @@ async fn reset_password(
     ))
 }
 
+// -- Logged-in password change (mandatory email OTP) ----------------------
+
+#[derive(Deserialize)]
+struct RequestPasswordChangeOtpRequestRest {
+    current_password: String,
+    new_password: String,
+}
+
+async fn request_password_change_otp(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<RequestPasswordChangeOtpRequestRest>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let mut c = client(&state).await?;
+    let resp = c
+        .request_password_change_otp(with_auth(
+            &headers,
+            pb::RequestPasswordChangeOtpRequest {
+                current_password: body.current_password,
+                new_password: body.new_password,
+            },
+        )?)
+        .await
+        .map_err(map_status)?
+        .into_inner();
+    Ok(Json(serde_json::json!({
+        "message": resp.message,
+        "ttl_seconds": resp.ttl_seconds,
+    })))
+}
+
+#[derive(Deserialize)]
+struct ConfirmPasswordChangeOtpRequestRest {
+    otp: String,
+    new_password: String,
+}
+
+async fn confirm_password_change_otp(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<ConfirmPasswordChangeOtpRequestRest>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let mut c = client(&state).await?;
+    c.confirm_password_change_otp(with_auth(
+        &headers,
+        pb::ConfirmPasswordChangeOtpRequest {
+            otp: body.otp,
+            new_password: body.new_password,
+        },
+    )?)
+    .await
+    .map_err(map_status)?;
+    Ok(Json(
+        serde_json::json!({"message":"Password updated. Please sign in again."}),
+    ))
+}
+
+// -- Super-admin platform settings ---------------------------------------
+
+#[derive(Deserialize)]
+struct UpdateResendConfigRequestRest {
+    api_key: String,
+    from_address: String,
+    reply_to: Option<String>,
+}
+
+async fn get_resend_config(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> ApiResult<Json<serde_json::Value>> {
+    let mut c = client(&state).await?;
+    let resp = c
+        .get_resend_config(with_auth(&headers, pb::GetResendConfigRequest {})?)
+        .await
+        .map_err(map_status)?
+        .into_inner();
+    Ok(Json(serde_json::json!({
+        "configured": resp.configured,
+        "source": resp.source,
+        "masked_key": resp.masked_key,
+        "from_address": resp.from_address,
+        "reply_to": resp.reply_to,
+    })))
+}
+
+async fn update_resend_config(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<UpdateResendConfigRequestRest>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let mut c = client(&state).await?;
+    let resp = c
+        .update_resend_config(with_auth(
+            &headers,
+            pb::UpdateResendConfigRequest {
+                api_key: body.api_key,
+                from_address: body.from_address,
+                reply_to: body.reply_to.unwrap_or_default(),
+            },
+        )?)
+        .await
+        .map_err(map_status)?
+        .into_inner();
+    let current = resp.current.unwrap_or_default();
+    Ok(Json(serde_json::json!({
+        "current": {
+            "configured": current.configured,
+            "source": current.source,
+            "masked_key": current.masked_key,
+            "from_address": current.from_address,
+            "reply_to": current.reply_to,
+        }
+    })))
+}
+
+#[derive(Deserialize)]
+struct TestResendConfigRequestRest {
+    recipient_email: String,
+}
+
+async fn test_resend_config(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<TestResendConfigRequestRest>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let mut c = client(&state).await?;
+    let resp = c
+        .test_resend_config(with_auth(
+            &headers,
+            pb::TestResendConfigRequest {
+                recipient_email: body.recipient_email,
+            },
+        )?)
+        .await
+        .map_err(map_status)?
+        .into_inner();
+    Ok(Json(serde_json::json!({ "message_id": resp.message_id })))
+}
+
 async fn profile(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -575,7 +720,11 @@ async fn list_org_members(
             user_id: m.user_id,
             email: m.email,
             display_name: m.display_name,
-            avatar: if m.avatar.is_empty() { None } else { Some(m.avatar) },
+            avatar: if m.avatar.is_empty() {
+                None
+            } else {
+                Some(m.avatar)
+            },
             role: role_to_string(m.role),
             status: member_status_to_string(m.status),
             joined_at: m.joined_at,
