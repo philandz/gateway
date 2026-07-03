@@ -77,6 +77,8 @@ pub fn router() -> Router<Arc<AppState>> {
         // Super-admin platform settings (mail provider)
         .route("/settings/resend", get(get_resend_config).patch(update_resend_config))
         .route("/settings/resend/test", post(test_resend_config))
+        // Super-admin platform settings (system environment)
+        .route("/settings/system", get(get_system_config).patch(update_system_config))
 }
 
 async fn test_get_handler() -> ApiResult<Json<serde_json::Value>> {
@@ -643,6 +645,70 @@ async fn test_resend_config(
         .map_err(map_status)?
         .into_inner();
     Ok(Json(serde_json::json!({ "message_id": resp.message_id })))
+}
+
+#[derive(Deserialize)]
+struct UpdateSystemConfigRequestRest {
+    app_public_base_url: String,
+    support_email: String,
+    default_locale: String,
+    mail_from_address: String,
+}
+
+async fn get_system_config(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> ApiResult<Json<serde_json::Value>> {
+    let mut c = client(&state).await?;
+    let resp = c
+        .get_system_config(with_auth(&headers, pb::GetSystemConfigRequest {})?)
+        .await
+        .map_err(map_status)?
+        .into_inner();
+    Ok(Json(serde_json::json!({
+        "app_public_base_url": resp.app_public_base_url,
+        "support_email": resp.support_email,
+        "default_locale": resp.default_locale,
+        "mail_from_address": resp.mail_from_address,
+        "source_app_public_base_url": resp.source_app_public_base_url,
+        "source_support_email": resp.source_support_email,
+        "source_default_locale": resp.source_default_locale,
+        "source_mail_from_address": resp.source_mail_from_address,
+    })))
+}
+
+async fn update_system_config(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<UpdateSystemConfigRequestRest>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let mut c = client(&state).await?;
+    let resp = c
+        .update_system_config(with_auth(
+            &headers,
+            pb::UpdateSystemConfigRequest {
+                app_public_base_url: body.app_public_base_url,
+                support_email: body.support_email,
+                default_locale: body.default_locale,
+                mail_from_address: body.mail_from_address,
+            },
+        )?)
+        .await
+        .map_err(map_status)?
+        .into_inner();
+    let c = resp.current.unwrap_or_default();
+    Ok(Json(serde_json::json!({
+        "current": {
+            "app_public_base_url": c.app_public_base_url,
+            "support_email": c.support_email,
+            "default_locale": c.default_locale,
+            "mail_from_address": c.mail_from_address,
+            "source_app_public_base_url": c.source_app_public_base_url,
+            "source_support_email": c.source_support_email,
+            "source_default_locale": c.source_default_locale,
+            "source_mail_from_address": c.source_mail_from_address,
+        }
+    })))
 }
 
 async fn profile(
