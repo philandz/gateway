@@ -1,14 +1,8 @@
 //! Regression test for the super-admin budget-detail 403.
 //!
-//! Exercises the **budget sub-router** (`gateway::budget::router()`) directly,
-//! routing a GET to `/budgets/<uuid>` (the inner path).  The public surface
-//! `GET /api/budget/budgets/<uuid>` reaches this code via the parent router's
-//! `/api/budget` prefix strip — the test bypasses that mount point and fires
-//! the inner handler path directly.
-//!
-//! Boots the budget Axum router in-process against a mock tonic BudgetService
-//! server. Fires the request with a JWT whose payload carries
-//! user_type=super_admin and asserts:
+//! Boots the gateway's budget Axum router in-process against a mock
+//! tonic BudgetService server. Fires GET /budgets/<uuid> with a JWT
+//! whose payload carries user_type=super_admin and asserts:
 //!   1. The response is 200 (not 403).
 //!   2. The downstream tonic server saw metadata `x-user-type` = "super_admin".
 //!   3. The downstream tonic server saw metadata `x-user-id` matching the JWT `sub`.
