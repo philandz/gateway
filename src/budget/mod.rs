@@ -115,6 +115,15 @@ fn with_user<T>(headers: &HeaderMap, req: T) -> ApiResult<GrpcRequest<T>> {
         }
     }
 
+    // Forward the user_type claim so downstream services can grant super_admin
+    // the Owner role without an explicit budget_members row (see
+    // budget/src/manager/biz/mod.rs `resolve_role`).
+    if let Some(user_type) = extract_user_type_from_bearer(auth) {
+        if let Ok(v) = MetadataValue::try_from(user_type.as_str()) {
+            grpc_req.metadata_mut().insert("x-user-type", v);
+        }
+    }
+
     Ok(grpc_req)
 }
 
@@ -126,6 +135,21 @@ fn extract_sub_from_bearer(bearer: &str) -> Option<String> {
     let claims: serde_json::Value = serde_json::from_slice(&decoded).ok()?;
     claims
         .get("sub")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+}
+
+/// Extract `user_type` claim from a Bearer JWT without signature verification.
+/// The gateway already validated the signature upstream; this is a thin claim
+/// read used to inform downstream services (e.g. budget resolve_role grants
+/// super_admin Owner without an explicit budget_members row).
+fn extract_user_type_from_bearer(bearer: &str) -> Option<String> {
+    let token = bearer.strip_prefix("Bearer ")?;
+    let payload_b64 = token.split('.').nth(1)?;
+    let decoded = base64url_decode_jwt(payload_b64)?;
+    let claims: serde_json::Value = serde_json::from_slice(&decoded).ok()?;
+    claims
+        .get("user_type")
         .and_then(|v| v.as_str())
         .map(|s| s.to_string())
 }

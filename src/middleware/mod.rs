@@ -16,12 +16,27 @@ fn is_super_admin_allowed_path(path: &str) -> bool {
     }
     // Budget-service admin paths — explicit list so we never accidentally
     // expose a per-org endpoint to super_admin.
-    matches!(
+    if matches!(
         path,
         "/api/budget/budgets/admin"
             | "/api/budget/members/admin"
             | "/api/budget/templates/admin"
-    )
+    ) {
+        return true;
+    }
+    // Per-budget routes: super admin can read/edit any budget to recover from
+    // cases where the owner is unavailable (locked out, deleted, etc.). The
+    // path segment after `/budgets/` is the budget UUID — we distinguish from
+    // the literal `admin` segment by requiring a 36-char (UUID-shaped) value.
+    // Sub-routes (`/members`, `/envelope`, `/rollover`, `/invest/...`) inherit
+    // this allowance automatically because we only check the prefix.
+    if let Some(rest) = path.strip_prefix("/api/budget/budgets/") {
+        let segment = rest.split('/').next().unwrap_or("");
+        if segment.len() == 36 && segment.chars().all(|c| c.is_ascii_hexdigit() || c == '-') {
+            return true;
+        }
+    }
+    false
 }
 
 /// Rejects Super Admin JWTs on non-admin paths.
