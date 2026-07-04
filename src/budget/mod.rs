@@ -108,6 +108,9 @@ fn with_user<T>(headers: &HeaderMap, req: T) -> ApiResult<GrpcRequest<T>> {
         .map_err(|_| map_status(Status::unauthenticated("Invalid Authorization header")))?;
     grpc_req.metadata_mut().insert("authorization", value);
 
+    // Outbound: explicitly clear any inbound service-actor header from external clients.
+    grpc_req.metadata_mut().remove("x-service-actor");
+
     // Decode JWT payload to extract sub (user_id) and inject as x-user-id
     if let Some(user_id) = extract_sub_from_bearer(auth) {
         if let Ok(v) = MetadataValue::try_from(user_id.as_str()) {
@@ -121,6 +124,14 @@ fn with_user<T>(headers: &HeaderMap, req: T) -> ApiResult<GrpcRequest<T>> {
     if let Some(user_type) = extract_user_type_from_bearer(auth) {
         if let Ok(v) = MetadataValue::try_from(user_type.as_str()) {
             grpc_req.metadata_mut().insert("x-user-type", v);
+        }
+        // Only the platform-known super-admin role may request service-actor
+        // escalation. The gateway never forwards an inbound x-service-actor
+        // header from the public HTTP surface.
+        if user_type == "super_admin" {
+            if let Ok(v) = MetadataValue::try_from("true") {
+                grpc_req.metadata_mut().insert("x-service-actor", v);
+            }
         }
     }
 
