@@ -95,6 +95,16 @@ fn with_user<T>(headers: &HeaderMap, req: T) -> ApiResult<GrpcRequest<T>> {
             grpc_req.metadata_mut().insert("x-user-id", v);
         }
     }
+    // Forward user_type so the downstream service can grant super_admin the
+    // Owner role without an explicit budget_members row (see
+    // budget/src/manager/biz/mod.rs `resolve_role`, mirrored by entry / category
+    // / sharing / insight). The gateway otherwise drops the JWT claim on the
+    // floor and super admin tokens get 403 on every per-budget read.
+    if let Some(ut) = extract_user_type(auth) {
+        if let Ok(v) = MetadataValue::try_from(ut.as_str()) {
+            grpc_req.metadata_mut().insert("x-user-type", v);
+        }
+    }
     Ok(grpc_req)
 }
 
@@ -105,6 +115,21 @@ fn extract_sub(bearer: &str) -> Option<String> {
     let claims: serde_json::Value = serde_json::from_slice(&decoded).ok()?;
     claims
         .get("sub")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+}
+
+/// Extract `user_type` claim from a Bearer JWT without signature verification.
+/// Unverified because the gateway doesn't have the secret — the identity
+/// service already verified the signature when it issued the token. This is
+/// the same pattern used in `gateway/src/budget/mod.rs`.
+fn extract_user_type(bearer: &str) -> Option<String> {
+    let token = bearer.strip_prefix("Bearer ")?;
+    let payload = token.split('.').nth(1)?;
+    let decoded = base64url_decode(payload)?;
+    let claims: serde_json::Value = serde_json::from_slice(&decoded).ok()?;
+    claims
+        .get("user_type")
         .and_then(|v| v.as_str())
         .map(|s| s.to_string())
 }

@@ -75,6 +75,11 @@ fn with_user<T>(headers: &HeaderMap, req: T) -> ApiResult<GrpcRequest<T>> {
             grpc_req.metadata_mut().insert("x-user-id", v);
         }
     }
+    if let Some(user_type) = extract_user_type(auth) {
+        if let Ok(v) = MetadataValue::try_from(user_type.as_str()) {
+            grpc_req.metadata_mut().insert("x-user-type", v);
+        }
+    }
     Ok(grpc_req)
 }
 
@@ -85,6 +90,18 @@ fn extract_sub(bearer: &str) -> Option<String> {
     let claims: serde_json::Value = serde_json::from_slice(&decoded).ok()?;
     claims
         .get("sub")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+}
+
+/// Extract `user_type` claim from a Bearer JWT without signature verification.
+fn extract_user_type(bearer: &str) -> Option<String> {
+    let token = bearer.strip_prefix("Bearer ")?;
+    let payload = token.split('.').nth(1)?;
+    let decoded = base64url_decode(payload)?;
+    let claims: serde_json::Value = serde_json::from_slice(&decoded).ok()?;
+    claims
+        .get("user_type")
         .and_then(|v| v.as_str())
         .map(|s| s.to_string())
 }
