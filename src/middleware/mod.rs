@@ -4,12 +4,15 @@ use axum::{extract::Request, http::StatusCode, middleware::Next, response::Respo
 /// under `/api/` is rejected so a super-admin token can't accidentally
 /// reach a per-org endpoint that expects an `org_id` claim.
 ///
-/// Three sources of allowed paths today:
+/// Sources of allowed paths:
 ///   - `/api/identity/*` — identity-service admin endpoints
 ///   - `/api/admin/*` — reserved for a future admin router
 ///   - `/api/budget/budgets/admin` (and other budget/admin paths) — super-admin
 ///     platform-wide budget view (lives under the budget service because
 ///     that's where the ListBudgetsAdmin RPC lives).
+///   - Per-org paths shaped `/api/{budget,category,entry,sharing}/budgets/{uuid}/...`
+///     — super admin is the break-glass recovery role. The gateway's
+///     `with_user` propagates `x-user-type` so downstream services grant Owner.
 fn is_super_admin_allowed_path(path: &str) -> bool {
     if path.starts_with("/api/identity/") || path.starts_with("/api/admin/") {
         return true;
@@ -24,16 +27,27 @@ fn is_super_admin_allowed_path(path: &str) -> bool {
     ) {
         return true;
     }
-    // Per-budget routes: super admin can read/edit any budget to recover from
-    // cases where the owner is unavailable (locked out, deleted, etc.). The
-    // path segment after `/budgets/` is the budget UUID — we distinguish from
-    // the literal `admin` segment by requiring a 36-char (UUID-shaped) value.
-    // Sub-routes (`/members`, `/envelope`, `/rollover`, `/invest/...`) inherit
-    // this allowance automatically because we only check the prefix.
-    if let Some(rest) = path.strip_prefix("/api/budget/budgets/") {
-        let segment = rest.split('/').next().unwrap_or("");
-        if segment.len() == 36 && segment.chars().all(|c| c.is_ascii_hexdigit() || c == '-') {
-            return true;
+    // Per-budget routes across budget / category / entry / sharing: super
+    // admin can read/edit any budget to recover from cases where the owner
+    // is unavailable (locked out, deleted, etc.). The path segment after
+    // `/budgets/` is the budget UUID — we distinguish from the literal
+    // `admin` segment by requiring a 36-char (UUID-shaped) value.
+    // Sub-routes (`/members`, `/envelope`, `/rollover`, `/invest/...`,
+    // `/entries/...`, `/categories/...`) inherit the allowance automatically
+    // because we only check the prefix.
+    for prefix in [
+        "/api/budget/budgets/",
+        "/api/category/budgets/",
+        "/api/entry/budgets/",
+        "/api/sharing/budgets/",
+    ] {
+        if let Some(rest) = path.strip_prefix(prefix) {
+            let segment = rest.split('/').next().unwrap_or("");
+            if segment.len() == 36
+                && segment.chars().all(|c| c.is_ascii_hexdigit() || c == '-')
+            {
+                return true;
+            }
         }
     }
     false

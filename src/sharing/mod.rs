@@ -79,6 +79,11 @@ fn with_user<T>(headers: &HeaderMap, req: T) -> ApiResult<GrpcRequest<T>> {
             grpc_req.metadata_mut().insert("x-user-id", v);
         }
     }
+    if let Some(ut) = extract_user_type(auth) {
+        if let Ok(v) = MetadataValue::try_from(ut.as_str()) {
+            grpc_req.metadata_mut().insert("x-user-type", v);
+        }
+    }
     Ok(grpc_req)
 }
 
@@ -102,6 +107,11 @@ fn with_user_or_guest<T>(headers: &HeaderMap, req: T) -> ApiResult<GrpcRequest<T
         if let Some(uid) = extract_sub(auth) {
             if let Ok(v) = MetadataValue::try_from(uid.as_str()) {
                 grpc_req.metadata_mut().insert("x-user-id", v);
+            }
+        }
+        if let Some(ut) = extract_user_type(auth) {
+            if let Ok(v) = MetadataValue::try_from(ut.as_str()) {
+                grpc_req.metadata_mut().insert("x-user-type", v);
             }
         }
     }
@@ -136,6 +146,19 @@ fn extract_sub(bearer: &str) -> Option<String> {
     let claims: serde_json::Value = serde_json::from_slice(&decoded).ok()?;
     claims
         .get("sub")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+}
+
+/// Extract `user_type` claim from a Bearer JWT without signature verification.
+/// See budget/mod.rs for the same pattern.
+fn extract_user_type(bearer: &str) -> Option<String> {
+    let token = bearer.strip_prefix("Bearer ")?;
+    let payload = token.split('.').nth(1)?;
+    let decoded = base64url_decode(payload)?;
+    let claims: serde_json::Value = serde_json::from_slice(&decoded).ok()?;
+    claims
+        .get("user_type")
         .and_then(|v| v.as_str())
         .map(|s| s.to_string())
 }
