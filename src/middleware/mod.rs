@@ -21,9 +21,7 @@ fn is_super_admin_allowed_path(path: &str) -> bool {
     // expose a per-org endpoint to super_admin.
     if matches!(
         path,
-        "/api/budget/budgets/admin"
-            | "/api/budget/members/admin"
-            | "/api/budget/templates/admin"
+        "/api/budget/budgets/admin" | "/api/budget/members/admin" | "/api/budget/templates/admin"
     ) {
         return true;
     }
@@ -43,9 +41,7 @@ fn is_super_admin_allowed_path(path: &str) -> bool {
     ] {
         if let Some(rest) = path.strip_prefix(prefix) {
             let segment = rest.split('/').next().unwrap_or("");
-            if segment.len() == 36
-                && segment.chars().all(|c| c.is_ascii_hexdigit() || c == '-')
-            {
+            if segment.len() == 36 && segment.chars().all(|c| c.is_ascii_hexdigit() || c == '-') {
                 return true;
             }
         }

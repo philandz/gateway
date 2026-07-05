@@ -75,10 +75,16 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/password/request-otp", post(request_password_change_otp))
         .route("/password/confirm-otp", post(confirm_password_change_otp))
         // Super-admin platform settings (mail provider)
-        .route("/settings/resend", get(get_resend_config).patch(update_resend_config))
+        .route(
+            "/settings/resend",
+            get(get_resend_config).patch(update_resend_config),
+        )
         .route("/settings/resend/test", post(test_resend_config))
         // Super-admin platform settings (system environment)
-        .route("/settings/system", get(get_system_config).patch(update_system_config))
+        .route(
+            "/settings/system",
+            get(get_system_config).patch(update_system_config),
+        )
 }
 
 async fn test_get_handler() -> ApiResult<Json<serde_json::Value>> {
