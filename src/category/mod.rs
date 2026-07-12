@@ -184,7 +184,8 @@ fn base64url_decode(input: &str) -> Option<Vec<u8>> {
 #[derive(Deserialize)]
 struct CreateCategoryRequest {
     name: String,
-    cat_type: Option<i32>,
+    #[serde(rename = "cat_type")]
+    kind: Option<i32>,
     icon: Option<String>,
     color: Option<String>,
     planned_amount: Option<i64>,
@@ -233,7 +234,7 @@ async fn create_category(
             pb::CreateCategoryRequest {
                 budget_id,
                 name: body.name,
-                cat_type: body.cat_type.unwrap_or(1),
+                kind: body.kind.unwrap_or(1),
                 icon: body.icon.unwrap_or_default(),
                 color: body.color.unwrap_or_default(),
                 planned_amount: body.planned_amount,
@@ -330,7 +331,7 @@ fn map_cat(c: &pb::Category) -> serde_json::Value {
         })).unwrap_or(serde_json::Value::Null),
         "budget_id":      c.budget_id,
         "name":           c.name,
-        "cat_type":       c.cat_type,
+        "kind":       c.kind,
         "icon":           c.icon,
         "color":          c.color,
         "planned_amount": c.planned_amount,

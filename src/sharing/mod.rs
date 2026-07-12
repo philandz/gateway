@@ -88,11 +88,16 @@ fn with_user<T>(headers: &HeaderMap, req: T) -> ApiResult<GrpcRequest<T>> {
 }
 
 fn with_user_or_guest<T>(headers: &HeaderMap, req: T) -> ApiResult<GrpcRequest<T>> {
-    let auth = headers
-        .get("authorization")
-        .and_then(|v| v.to_str().ok())
-        .ok_or_else(|| map_status(Status::unauthenticated("Missing Authorization header")))?;
     let mut grpc_req = GrpcRequest::new(req);
+    let auth = match headers.get("authorization").and_then(|v| v.to_str().ok()) {
+        Some(a) => a,
+        None => {
+            // No Authorization header — skip adding any auth metadata.
+            // The sharing service will reject requests that need auth
+            // (or accept guests with just x-session-token from elsewhere).
+            return Ok(grpc_req);
+        }
+    };
     if auth.starts_with("SharingSession ") {
         // Guest auth
         let token = auth.strip_prefix("SharingSession ").unwrap().trim();
