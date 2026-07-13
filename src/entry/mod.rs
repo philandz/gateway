@@ -237,6 +237,8 @@ struct ListEntriesQuery {
     q: Option<String>,
     kind: Option<String>,
     category_id: Option<String>,
+    category_ids: Option<String>,
+    member_ids: Option<String>,
     date_from: Option<String>,
     date_to: Option<String>,
     amount_min: Option<i64>,
@@ -367,10 +369,43 @@ async fn list_entries(
     headers: HeaderMap,
 ) -> ApiResult<Json<serde_json::Value>> {
     let mut c = client(&state).await?;
+
+    // Parse category_ids: prefer plural form, fall back to singular if plural is absent
+    let category_ids: Vec<String> = if let Some(ids) = &q.category_ids {
+        if !ids.is_empty() {
+            ids.split(',')
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string())
+                .collect()
+        } else {
+            vec![]
+        }
+    } else if let Some(id) = &q.category_id {
+        if id.is_empty() {
+            vec![]
+        } else {
+            vec![id.clone()]
+        }
+    } else {
+        vec![]
+    };
+
+    // Parse member_ids: split on comma
+    let member_ids: Vec<String> = q
+        .member_ids
+        .as_deref()
+        .unwrap_or("")
+        .split(',')
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .collect();
+
     let params = pb::ListParams {
         q: q.q,
         kind: q.kind,
         category_id: q.category_id,
+        category_ids,
+        member_ids,
         date_from: q.date_from,
         date_to: q.date_to,
         amount_min: q.amount_min,
@@ -415,10 +450,43 @@ async fn list_all_entries(
         .filter(|s| !s.is_empty())
         .map(|s| s.to_string())
         .collect();
+
+    // Parse category_ids: prefer plural form, fall back to singular if plural is absent
+    let category_ids: Vec<String> = if let Some(ids) = &q.category_ids {
+        if !ids.is_empty() {
+            ids.split(',')
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string())
+                .collect()
+        } else {
+            vec![]
+        }
+    } else if let Some(id) = &q.category_id {
+        if id.is_empty() {
+            vec![]
+        } else {
+            vec![id.clone()]
+        }
+    } else {
+        vec![]
+    };
+
+    // Parse member_ids: split on comma
+    let member_ids: Vec<String> = q
+        .member_ids
+        .as_deref()
+        .unwrap_or("")
+        .split(',')
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .collect();
+
     let params = pb::ListParams {
         q: q.q,
         kind: q.kind,
         category_id: q.category_id,
+        category_ids,
+        member_ids,
         date_from: q.date_from,
         date_to: q.date_to,
         amount_min: q.amount_min,
@@ -856,4 +924,9 @@ fn map_attachment(a: &pb::Attachment) -> serde_json::Value {
         "file_id": a.file_id,
         "file_name": a.file_name,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    mod list_entries_query;
 }

@@ -9,6 +9,7 @@ tonic-build = "0.12"
 [dev-dependencies]
 base64 = "0.22"
 parking_lot = "0.12"
+serde_urlencoded = "0.7"
 tokio-stream = "0.1"
 
 [dependencies]
