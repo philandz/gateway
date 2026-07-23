@@ -792,11 +792,7 @@ async fn list_org_members(
             user_id: m.user_id,
             email: m.email,
             display_name: m.display_name,
-            avatar: if m.avatar.is_empty() {
-                None
-            } else {
-                Some(m.avatar)
-            },
+avatar: if m.avatar.is_empty() { None } else { Some(m.avatar) },
             role: role_to_string(m.role),
             status: member_status_to_string(m.status),
             joined_at: m.joined_at,
