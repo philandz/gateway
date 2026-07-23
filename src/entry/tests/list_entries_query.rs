@@ -58,6 +58,23 @@ fn member_ids_parses_single_uuid() {
     assert_eq!(ids[0], "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
 }
 
+#[test]
+fn member_ids_parses_two_comma_separated_ids() {
+    let q: ListEntriesQuery = serde_urlencoded::from_str("member_ids=user-a,user-b").unwrap();
+
+    let ids: Vec<&str> = q
+        .member_ids
+        .as_deref()
+        .unwrap_or("")
+        .split(',')
+        .filter(|s| !s.is_empty())
+        .collect();
+
+    assert_eq!(ids.len(), 2, "expected 2 IDs, got: {ids:?}");
+    assert_eq!(ids[0], "user-a");
+    assert_eq!(ids[1], "user-b");
+}
+
 // ---------------------------------------------------------------------------
 // Empty string -> None
 // ---------------------------------------------------------------------------

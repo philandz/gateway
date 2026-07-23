@@ -261,6 +261,16 @@ struct UpdateBudgetRequest {
 #[derive(Deserialize)]
 struct ListBudgetsQuery {
     org_id: String,
+    q: Option<String>,
+    #[serde(rename = "type")]
+    budget_type: Option<String>,
+    role: Option<String>,
+    sort_by: Option<String>,
+    #[serde(rename = "sort_dir")]
+    sort_dir: Option<String>,
+    page: Option<i32>,
+    #[serde(rename = "page_size")]
+    page_size: Option<i32>,
 }
 
 #[derive(Deserialize)]
@@ -386,20 +396,93 @@ async fn list_budgets(
     Query(params): Query<ListBudgetsQuery>,
     headers: HeaderMap,
 ) -> ApiResult<Json<serde_json::Value>> {
+    // Validate type and role enums strictly; return 400 for invalid values
+    let budget_type = if let Some(ref t) = params.budget_type {
+        match parse_budget_type_strict(t) {
+            Some(v) => Some(
+                pb::BudgetType::try_from(v)
+                    .unwrap_or(pb::BudgetType::Standard)
+                    .into(),
+            ),
+            None => {
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    Json(philand_error::ErrorEnvelope {
+                        code: "INVALID_ARGUMENT".to_string(),
+                        message: format!("invalid budget type: {}", t),
+                        details: vec![],
+                    }),
+                ));
+            }
+        }
+    } else {
+        None
+    };
+
+    let role = if let Some(ref r) = params.role {
+        match parse_budget_role_strict(r) {
+            Some(v) => Some(
+                pb::BudgetRole::try_from(v)
+                    .unwrap_or(pb::BudgetRole::Viewer)
+                    .into(),
+            ),
+            None => {
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    Json(philand_error::ErrorEnvelope {
+                        code: "INVALID_ARGUMENT".to_string(),
+                        message: format!("invalid budget role: {}", r),
+                        details: vec![],
+                    }),
+                ));
+            }
+        }
+    } else {
+        None
+    };
+
+    let list_params = pb::ListBudgetParams {
+        q: params.q.clone(),
+        budget_type,
+        role,
+        sort_by: params.sort_by.clone(),
+        sort_dir: params.sort_dir.clone(),
+        page: Some(params.page.map(|p| p.max(1)).unwrap_or(1)),
+        page_size: Some(params.page_size.map(|p| p.clamp(1, 100)).unwrap_or(20)),
+    };
+
     let mut c = client(&state).await?;
     let resp = c
         .list_budgets(with_user(
             &headers,
             pb::ListBudgetsRequest {
                 org_id: params.org_id,
+                params: Some(list_params),
             },
         )?)
         .await
         .map_err(map_status)?
         .into_inner();
+
     let budgets: Vec<serde_json::Value> =
         resp.budgets.iter().map(|b| map_budget(Some(b))).collect();
-    Ok(Json(serde_json::json!({"budgets": budgets})))
+
+    let meta = resp
+        .meta
+        .map(|m| {
+            serde_json::json!({
+                "page": m.page,
+                "page_size": m.page_size,
+                "total_pages": m.total_pages,
+                "total_rows": m.total_rows,
+            })
+        })
+        .unwrap_or_else(|| serde_json::json!({}));
+
+    Ok(Json(serde_json::json!({
+        "budgets": budgets,
+        "meta": meta,
+    })))
 }
 
 // -- Super-admin: list every budget across every org ------------------------
@@ -919,6 +1002,29 @@ fn parse_budget_type(v: Option<&serde_json::Value>) -> i32 {
     }
 }
 
+/// Strict budget_type parser for query params. Returns Some(i32) for valid values, None for invalid.
+fn parse_budget_type_strict(v: &str) -> Option<i32> {
+    match v {
+        "standard" | "1" => Some(1),
+        "saving" | "2" => Some(2),
+        "debt" | "3" => Some(3),
+        "invest" | "4" => Some(4),
+        "sharing" | "5" => Some(5),
+        _ => None,
+    }
+}
+
+/// Strict budget_role parser for query params. Returns Some(i32) for valid values, None for invalid.
+fn parse_budget_role_strict(v: &str) -> Option<i32> {
+    match v {
+        "owner" | "1" => Some(1),
+        "manager" | "2" => Some(2),
+        "contributor" | "3" => Some(3),
+        "viewer" | "4" => Some(4),
+        _ => None,
+    }
+}
+
 /// Convert a budget_role value that may be a string ("owner") or integer (1) to proto i32.
 fn parse_budget_role(v: Option<&serde_json::Value>) -> i32 {
     match v {
@@ -983,4 +1089,59 @@ fn map_snapshot(s: &pb::PriceSnapshot) -> serde_json::Value {
         "source":        s.source,
         "snapshot_date": s.snapshot_date,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_budget_type_strict_accepts_valid_string() {
+        assert_eq!(parse_budget_type_strict("standard"), Some(1));
+        assert_eq!(parse_budget_type_strict("saving"), Some(2));
+        assert_eq!(parse_budget_type_strict("debt"), Some(3));
+        assert_eq!(parse_budget_type_strict("invest"), Some(4));
+        assert_eq!(parse_budget_type_strict("sharing"), Some(5));
+    }
+
+    #[test]
+    fn parse_budget_type_strict_accepts_valid_integer() {
+        assert_eq!(parse_budget_type_strict("1"), Some(1));
+        assert_eq!(parse_budget_type_strict("2"), Some(2));
+        assert_eq!(parse_budget_type_strict("3"), Some(3));
+        assert_eq!(parse_budget_type_strict("4"), Some(4));
+        assert_eq!(parse_budget_type_strict("5"), Some(5));
+    }
+
+    #[test]
+    fn parse_budget_type_strict_rejects_invalid() {
+        assert_eq!(parse_budget_type_strict("invalid"), None);
+        assert_eq!(parse_budget_type_strict("owner"), None);
+        assert_eq!(parse_budget_type_strict("0"), None);
+        assert_eq!(parse_budget_type_strict("99"), None);
+    }
+
+    #[test]
+    fn parse_budget_role_strict_accepts_valid_string() {
+        assert_eq!(parse_budget_role_strict("owner"), Some(1));
+        assert_eq!(parse_budget_role_strict("manager"), Some(2));
+        assert_eq!(parse_budget_role_strict("contributor"), Some(3));
+        assert_eq!(parse_budget_role_strict("viewer"), Some(4));
+    }
+
+    #[test]
+    fn parse_budget_role_strict_accepts_valid_integer() {
+        assert_eq!(parse_budget_role_strict("1"), Some(1));
+        assert_eq!(parse_budget_role_strict("2"), Some(2));
+        assert_eq!(parse_budget_role_strict("3"), Some(3));
+        assert_eq!(parse_budget_role_strict("4"), Some(4));
+    }
+
+    #[test]
+    fn parse_budget_role_strict_rejects_invalid() {
+        assert_eq!(parse_budget_role_strict("standard"), None);
+        assert_eq!(parse_budget_role_strict("saving"), None);
+        assert_eq!(parse_budget_role_strict("0"), None);
+        assert_eq!(parse_budget_role_strict("99"), None);
+    }
 }

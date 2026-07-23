@@ -29,6 +29,7 @@ pub fn router() -> Router<Arc<AppState>> {
             post(create_recurring),
         )
         .route("/budgets/{budget_id}/entries/split", post(create_split))
+        .route("/budgets/{budget_id}/summary", get(get_entry_summary))
         .route("/entries", get(list_all_entries).post(create_entry))
         .route(
             "/entries/{entry_id}",
@@ -853,6 +854,33 @@ async fn list_split_legs(
     Ok(Json(
         serde_json::json!({"split_group_id": resp.split_group_id, "legs": legs}),
     ))
+}
+
+// ---------------------------------------------------------------------------
+// Summary
+// ---------------------------------------------------------------------------
+
+async fn get_entry_summary(
+    State(state): State<Arc<AppState>>,
+    Path(budget_id): Path<String>,
+    headers: HeaderMap,
+) -> ApiResult<Json<serde_json::Value>> {
+    let mut c = client(&state).await?;
+    let resp = c
+        .get_entry_summary(with_user(
+            &headers,
+            pb::GetEntrySummaryRequest { budget_id },
+        )?)
+        .await
+        .map_err(map_status)?
+        .into_inner();
+    // Map all four snake_case fields unchanged
+    Ok(Json(serde_json::json!({
+        "budget_id": resp.budget_id,
+        "total_income": resp.total_income,
+        "total_expense": resp.total_expense,
+        "current_balance": resp.current_balance,
+    })))
 }
 
 // ---------------------------------------------------------------------------
