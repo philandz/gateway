@@ -42,7 +42,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let file_refs: Vec<&str> = files.iter().map(String::as_str).collect();
 
     tonic_build::configure()
-        .build_server(false)
+        .build_server(true)
         .compile_protos(&file_refs, &include_refs)?;
     Ok(())
 }

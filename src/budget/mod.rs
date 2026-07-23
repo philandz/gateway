@@ -43,6 +43,8 @@ pub fn router() -> Router<Arc<AppState>> {
             put(set_rollover_policy).get(get_rollover_policy),
         )
         .route("/templates", get(list_templates))
+        // Super-admin: list every budget across every org (platform-wide view).
+        .route("/budgets/admin", get(list_budgets_admin))
         // Invest assets
         .route(
             "/budgets/{budget_id}/invest/assets",
@@ -106,10 +108,30 @@ fn with_user<T>(headers: &HeaderMap, req: T) -> ApiResult<GrpcRequest<T>> {
         .map_err(|_| map_status(Status::unauthenticated("Invalid Authorization header")))?;
     grpc_req.metadata_mut().insert("authorization", value);
 
+    // Outbound: explicitly clear any inbound service-actor header from external clients.
+    grpc_req.metadata_mut().remove("x-service-actor");
+
     // Decode JWT payload to extract sub (user_id) and inject as x-user-id
     if let Some(user_id) = extract_sub_from_bearer(auth) {
         if let Ok(v) = MetadataValue::try_from(user_id.as_str()) {
             grpc_req.metadata_mut().insert("x-user-id", v);
+        }
+    }
+
+    // Forward the user_type claim so downstream services can grant super_admin
+    // the Owner role without an explicit budget_members row (see
+    // budget/src/manager/biz/mod.rs `resolve_role`).
+    if let Some(user_type) = extract_user_type_from_bearer(auth) {
+        if let Ok(v) = MetadataValue::try_from(user_type.as_str()) {
+            grpc_req.metadata_mut().insert("x-user-type", v);
+        }
+        // Only the platform-known super-admin role may request service-actor
+        // escalation. The gateway never forwards an inbound x-service-actor
+        // header from the public HTTP surface.
+        if user_type == "super_admin" {
+            if let Ok(v) = MetadataValue::try_from("true") {
+                grpc_req.metadata_mut().insert("x-service-actor", v);
+            }
         }
     }
 
@@ -124,6 +146,21 @@ fn extract_sub_from_bearer(bearer: &str) -> Option<String> {
     let claims: serde_json::Value = serde_json::from_slice(&decoded).ok()?;
     claims
         .get("sub")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+}
+
+/// Extract `user_type` claim from a Bearer JWT without signature verification.
+/// The gateway already validated the signature upstream; this is a thin claim
+/// read used to inform downstream services (e.g. budget resolve_role grants
+/// super_admin Owner without an explicit budget_members row).
+fn extract_user_type_from_bearer(bearer: &str) -> Option<String> {
+    let token = bearer.strip_prefix("Bearer ")?;
+    let payload_b64 = token.split('.').nth(1)?;
+    let decoded = base64url_decode_jwt(payload_b64)?;
+    let claims: serde_json::Value = serde_json::from_slice(&decoded).ok()?;
+    claims
+        .get("user_type")
         .and_then(|v| v.as_str())
         .map(|s| s.to_string())
 }
@@ -365,6 +402,45 @@ async fn list_budgets(
     Ok(Json(serde_json::json!({"budgets": budgets})))
 }
 
+// -- Super-admin: list every budget across every org ------------------------
+
+#[derive(serde::Deserialize, Default)]
+struct ListBudgetsAdminQuery {
+    org_id: Option<String>,
+    budget_type: Option<String>,
+    name_search: Option<String>,
+    page: Option<i32>,
+    page_size: Option<i32>,
+}
+
+async fn list_budgets_admin(
+    State(state): State<Arc<AppState>>,
+    Query(params): Query<ListBudgetsAdminQuery>,
+    headers: HeaderMap,
+) -> ApiResult<Json<serde_json::Value>> {
+    let mut c = client(&state).await?;
+    let resp = c
+        .list_budgets_admin(with_user(
+            &headers,
+            pb::ListBudgetsAdminRequest {
+                org_id: params.org_id.unwrap_or_default(),
+                budget_type: params.budget_type.unwrap_or_default(),
+                name_search: params.name_search.unwrap_or_default(),
+                page: params.page.unwrap_or(1),
+                page_size: params.page_size.unwrap_or(20),
+            },
+        )?)
+        .await
+        .map_err(map_status)?
+        .into_inner();
+    let budgets: Vec<serde_json::Value> =
+        resp.budgets.iter().map(|b| map_budget(Some(b))).collect();
+    Ok(Json(serde_json::json!({
+        "budgets": budgets,
+        "total": resp.total,
+    })))
+}
+
 async fn list_members(
     State(state): State<Arc<AppState>>,
     Path(budget_id): Path<String>,
@@ -397,6 +473,7 @@ async fn add_member(
                 budget_id,
                 user_id: body.user_id,
                 role: parse_budget_role(body.role.as_ref()),
+                system_actor: false,
             },
         )?)
         .await
@@ -786,12 +863,16 @@ async fn list_price_snapshots(
 fn map_budget(budget: Option<&pb::Budget>) -> serde_json::Value {
     budget.map_or(serde_json::Value::Null, |b| {
         serde_json::json!({
-            "base": map_base(b.base.as_ref()),
-            "org_id":      b.org_id,
-            "name":        b.name,
-            "budget_type": b.budget_type,
-            "currency":    b.currency,
-            "my_role":     b.my_role,
+            "base":          map_base(b.base.as_ref()),
+            "org_id":        b.org_id,
+            "name":          b.name,
+            "budget_type":   b.budget_type,
+            "currency":      b.currency,
+            "my_role":       b.my_role,
+            "envelope_limit": b.envelope_limit,
+            "current_spend":  b.current_spend,
+            "burn_rate_pct":  b.burn_rate_pct,
+            "member_count":   b.member_count,
         })
     })
 }

@@ -95,6 +95,16 @@ fn with_user<T>(headers: &HeaderMap, req: T) -> ApiResult<GrpcRequest<T>> {
             grpc_req.metadata_mut().insert("x-user-id", v);
         }
     }
+    // Forward user_type so the downstream service can grant super_admin the
+    // Owner role without an explicit budget_members row (see
+    // budget/src/manager/biz/mod.rs `resolve_role`, mirrored by entry / category
+    // / sharing / insight). The gateway otherwise drops the JWT claim on the
+    // floor and super admin tokens get 403 on every per-budget read.
+    if let Some(ut) = extract_user_type(auth) {
+        if let Ok(v) = MetadataValue::try_from(ut.as_str()) {
+            grpc_req.metadata_mut().insert("x-user-type", v);
+        }
+    }
     Ok(grpc_req)
 }
 
@@ -105,6 +115,21 @@ fn extract_sub(bearer: &str) -> Option<String> {
     let claims: serde_json::Value = serde_json::from_slice(&decoded).ok()?;
     claims
         .get("sub")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+}
+
+/// Extract `user_type` claim from a Bearer JWT without signature verification.
+/// Unverified because the gateway doesn't have the secret — the identity
+/// service already verified the signature when it issued the token. This is
+/// the same pattern used in `gateway/src/budget/mod.rs`.
+fn extract_user_type(bearer: &str) -> Option<String> {
+    let token = bearer.strip_prefix("Bearer ")?;
+    let payload = token.split('.').nth(1)?;
+    let decoded = base64url_decode(payload)?;
+    let claims: serde_json::Value = serde_json::from_slice(&decoded).ok()?;
+    claims
+        .get("user_type")
         .and_then(|v| v.as_str())
         .map(|s| s.to_string())
 }
@@ -212,6 +237,8 @@ struct ListEntriesQuery {
     q: Option<String>,
     kind: Option<String>,
     category_id: Option<String>,
+    category_ids: Option<String>,
+    member_ids: Option<String>,
     date_from: Option<String>,
     date_to: Option<String>,
     amount_min: Option<i64>,
@@ -342,10 +369,43 @@ async fn list_entries(
     headers: HeaderMap,
 ) -> ApiResult<Json<serde_json::Value>> {
     let mut c = client(&state).await?;
+
+    // Parse category_ids: prefer plural form, fall back to singular if plural is absent
+    let category_ids: Vec<String> = if let Some(ids) = &q.category_ids {
+        if !ids.is_empty() {
+            ids.split(',')
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string())
+                .collect()
+        } else {
+            vec![]
+        }
+    } else if let Some(id) = &q.category_id {
+        if id.is_empty() {
+            vec![]
+        } else {
+            vec![id.clone()]
+        }
+    } else {
+        vec![]
+    };
+
+    // Parse member_ids: split on comma
+    let member_ids: Vec<String> = q
+        .member_ids
+        .as_deref()
+        .unwrap_or("")
+        .split(',')
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .collect();
+
     let params = pb::ListParams {
         q: q.q,
         kind: q.kind,
         category_id: q.category_id,
+        category_ids,
+        member_ids,
         date_from: q.date_from,
         date_to: q.date_to,
         amount_min: q.amount_min,
@@ -390,10 +450,43 @@ async fn list_all_entries(
         .filter(|s| !s.is_empty())
         .map(|s| s.to_string())
         .collect();
+
+    // Parse category_ids: prefer plural form, fall back to singular if plural is absent
+    let category_ids: Vec<String> = if let Some(ids) = &q.category_ids {
+        if !ids.is_empty() {
+            ids.split(',')
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string())
+                .collect()
+        } else {
+            vec![]
+        }
+    } else if let Some(id) = &q.category_id {
+        if id.is_empty() {
+            vec![]
+        } else {
+            vec![id.clone()]
+        }
+    } else {
+        vec![]
+    };
+
+    // Parse member_ids: split on comma
+    let member_ids: Vec<String> = q
+        .member_ids
+        .as_deref()
+        .unwrap_or("")
+        .split(',')
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .collect();
+
     let params = pb::ListParams {
         q: q.q,
         kind: q.kind,
         category_id: q.category_id,
+        category_ids,
+        member_ids,
         date_from: q.date_from,
         date_to: q.date_to,
         amount_min: q.amount_min,
@@ -831,4 +924,9 @@ fn map_attachment(a: &pb::Attachment) -> serde_json::Value {
         "file_id": a.file_id,
         "file_name": a.file_name,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    mod list_entries_query;
 }
