@@ -184,11 +184,36 @@ fn base64url_decode(input: &str) -> Option<Vec<u8>> {
 #[derive(Deserialize)]
 struct CreateCategoryRequest {
     name: String,
-    #[serde(rename = "cat_type")]
+    #[serde(alias = "cat_type")]
     kind: Option<i32>,
     icon: Option<String>,
     color: Option<String>,
     planned_amount: Option<i64>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::CreateCategoryRequest;
+
+    #[test]
+    fn create_category_accepts_canonical_kind() {
+        let body: CreateCategoryRequest = serde_json::from_value(serde_json::json!({
+            "name": "Salary",
+            "kind": 2
+        }))
+        .unwrap();
+        assert_eq!(body.kind, Some(2));
+    }
+
+    #[test]
+    fn create_category_accepts_legacy_cat_type_alias() {
+        let body: CreateCategoryRequest = serde_json::from_value(serde_json::json!({
+            "name": "Salary",
+            "cat_type": 2
+        }))
+        .unwrap();
+        assert_eq!(body.kind, Some(2));
+    }
 }
 
 #[derive(Deserialize)]
