@@ -343,7 +343,7 @@ async fn add_expense(
         .map(|l| pb::ExpenseLeg {
             user_id: l.user_id,
             amount: l.amount,
-            weight: l.weight,
+            weight: 0,
             share: 0,
         })
         .collect();
@@ -379,7 +379,7 @@ async fn add_expense(
                 category_id: body.category_id.unwrap_or_default(),
                 split_method: body.split_method.unwrap_or(1),
                 legs,
-                items,
+items,
                 receipt_media_id: body.receipt_media_id.unwrap_or_default(),
             },
         )?)

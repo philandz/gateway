@@ -331,7 +331,7 @@ fn map_cat(c: &pb::Category) -> serde_json::Value {
         })).unwrap_or(serde_json::Value::Null),
         "budget_id":      c.budget_id,
         "name":           c.name,
-        "kind":       c.kind,
+        "kind":           c.kind,
         "icon":           c.icon,
         "color":          c.color,
         "planned_amount": c.planned_amount,
