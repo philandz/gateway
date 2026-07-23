@@ -60,8 +60,7 @@ fn member_ids_parses_single_uuid() {
 
 #[test]
 fn member_ids_parses_two_comma_separated_ids() {
-    let q: ListEntriesQuery =
-        serde_urlencoded::from_str("member_ids=user-a,user-b").unwrap();
+    let q: ListEntriesQuery = serde_urlencoded::from_str("member_ids=user-a,user-b").unwrap();
 
     let ids: Vec<&str> = q
         .member_ids
