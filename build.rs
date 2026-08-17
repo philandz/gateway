@@ -34,6 +34,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         format!("{proto_prefix}/category/category.proto"),
         format!("{proto_prefix}/entry/entry.proto"),
         format!("{proto_prefix}/sharing/sharing.proto"),
+        format!("{proto_prefix}/portfolio/portfolio.proto"),
         format!("{proto_prefix}/shared/user/user.proto"),
         format!("{proto_prefix}/shared/organization/organization.proto"),
         format!("{proto_prefix}/shared/media/media.proto"),
@@ -43,6 +44,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     tonic_build::configure()
         .build_server(true)
+        .type_attribute(".", "#[derive(serde::Serialize, serde::Deserialize)]")
         .compile_protos(&file_refs, &include_refs)?;
     Ok(())
 }

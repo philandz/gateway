@@ -6,7 +6,7 @@ use axum::{
     routing::{delete, get, patch, put},
     Json, Router,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 use tonic::{metadata::MetadataValue, transport::Channel, Request as GrpcRequest, Status};
 
 use crate::pb::service::budget as pb;
@@ -713,6 +713,7 @@ async fn list_templates(
 
 #[derive(Deserialize)]
 struct CreateInvestAssetRequest {
+    #[serde(default, deserialize_with = "deserialize_asset_type")]
     asset_type: Option<i32>,
     name: String,
     principal: Option<i64>,
@@ -753,6 +754,30 @@ struct AddPriceSnapshotRequest {
 #[derive(Deserialize)]
 struct ListSnapshotsQuery {
     limit: Option<i32>,
+}
+
+/// Accept the legacy `AssetType` enum as either an integer (1/2/3) or a
+/// case-insensitive snake_case string ("savings_deposit"/"gold"/"stock").
+/// The web frontend sends the string form; older API clients may send ints.
+/// `null`/missing falls back to the proto default (1 = savings_deposit).
+fn deserialize_asset_type<'de, D>(deserializer: D) -> Result<Option<i32>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    use serde::de::Error;
+    let value = serde_json::Value::deserialize(deserializer)?;
+    match value {
+        serde_json::Value::Null => Ok(None),
+        serde_json::Value::Number(n) => n.as_i64().map(|i| i as i32).map(Some).ok_or_else(|| D::Error::custom("asset_type must be an integer")),
+        serde_json::Value::String(s) => match s.to_ascii_lowercase().as_str() {
+            "" => Ok(None),
+            "savings_deposit" | "savings" | "savingsaccount" | "savings_account" => Ok(Some(1)),
+            "gold" => Ok(Some(2)),
+            "stock" => Ok(Some(3)),
+            other => Err(D::Error::custom(format!("unknown asset_type '{other}'"))),
+        },
+        _ => Err(D::Error::custom("asset_type must be an integer or string")),
+    }
 }
 
 async fn create_invest_asset(

@@ -32,6 +32,7 @@ async fn main() -> anyhow::Result<()> {
         env::var("MEDIA_GRPC_URL").unwrap_or_else(|_| "http://127.0.0.1:50052".to_string());
     let budget_grpc_url =
         env::var("BUDGET_GRPC_URL").unwrap_or_else(|_| "http://127.0.0.1:50103".to_string());
+    let portfolio_grpc_url = env::var("PORTFOLIO_GRPC_URL").unwrap_or_else(|_| budget_grpc_url.clone());
     let category_grpc_url =
         env::var("CATEGORY_GRPC_URL").unwrap_or_else(|_| "http://127.0.0.1:50104".to_string());
     let entry_grpc_url =
@@ -47,6 +48,7 @@ async fn main() -> anyhow::Result<()> {
         identity_grpc_url: config.identity_grpc_url,
         media_grpc_url,
         budget_grpc_url,
+        portfolio_grpc_url,
         category_grpc_url,
         entry_grpc_url,
         sharing_grpc_url,
@@ -68,7 +70,8 @@ async fn main() -> anyhow::Result<()> {
             .nest("/budget", gateway::budget::router())
             .nest("/category", gateway::category::router())
             .nest("/entry", gateway::entry::router())
-            .nest("/sharing", gateway::sharing::router()),
+            .nest("/sharing", gateway::sharing::router())
+            .nest("/portfolios", gateway::portfolio::router()),
     }
     .layer(middleware::from_fn(
         gateway::middleware::reject_super_admin_on_user_paths,

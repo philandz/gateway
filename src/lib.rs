@@ -23,6 +23,9 @@ pub mod pb {
         pub mod sharing {
             tonic::include_proto!("service.sharing");
         }
+        pub mod portfolio {
+            tonic::include_proto!("service.portfolio");
+        }
     }
     pub mod shared {
         pub mod user {
@@ -43,6 +46,7 @@ pub mod entry;
 pub mod identity;
 pub mod media;
 pub mod middleware;
+pub mod portfolio;
 pub mod proxy;
 pub mod sharing;
 pub mod swagger;
@@ -84,6 +88,8 @@ pub struct AppState {
     pub media_grpc_url: String,
     /// Budget service gRPC endpoint.
     pub budget_grpc_url: String,
+    /// Portfolio gRPC endpoint (same as budget today; listed separately for future split).
+    pub portfolio_grpc_url: String,
     /// Category service gRPC endpoint.
     pub category_grpc_url: String,
     /// Entry service gRPC endpoint.
