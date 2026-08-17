@@ -318,7 +318,14 @@ async fn create_budget(
         .await
         .map_err(map_status)?
         .into_inner();
-    Ok((StatusCode::CREATED, Json(map_budget(resp.budget.as_ref()))))
+    // Wrap single-entity responses in { budget: ... } to match the
+    // list-side wrapping convention used elsewhere in this module and to
+    // mirror the identity service's { user: ... } shape. Per
+    // infra/.ai/skills/03-gateway/rest-conventions.md.
+    Ok((
+        StatusCode::CREATED,
+        Json(serde_json::json!({ "budget": map_budget(resp.budget.as_ref()) })),
+    ))
 }
 
 async fn get_budget(
