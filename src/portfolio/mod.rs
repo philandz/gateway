@@ -1,35 +1,36 @@
 //! Gateway REST routes for the Asset Portfolio service.
 //!
 //! Routes proxy to the Budget gRPC server's `PortfolioService`, mounted
-//! under `/api/budget/budgets/{budget_id}/portfolio/...` per the Asset
+//! under `/api/portfolios/budgets/{budget_id}/portfolio/...` per the Asset
 //! Portfolio spec §11.4. Proto messages are passed through as JSON.
 
 use std::sync::Arc;
 
 use axum::{
     extract::{Path, Query, State},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     routing::{get, post},
     Json, Router,
 };
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use base64::Engine as _;
 use serde::Deserialize;
+use tonic::{metadata::MetadataValue, transport::Channel, Request as GrpcRequest};
 use tracing::warn;
 
+use crate::pb::service::portfolio as pb;
+use crate::pb::service::portfolio::portfolio_service_client::PortfolioServiceClient;
+use crate::AppState;
+use philand_error::ErrorEnvelope as ErrorResponse;
+
 /// Serialize a proto message to JSON, logging instead of silently
-/// swallowing serialization errors. JSON serialization of generated proto
-/// types is rare in practice but the warning is cheap insurance.
+/// swallowing serialization errors.
 fn to_json_or_log<T: serde::Serialize>(value: &T, ctx: &str) -> serde_json::Value {
     serde_json::to_value(value).unwrap_or_else(|e| {
         warn!("portfolio JSON serialize failed for {ctx}: {e}");
         serde_json::Value::Null
     })
 }
-use tonic::{metadata::MetadataValue, transport::Channel, Request as GrpcRequest};
-
-use crate::pb::service::portfolio as pb;
-use crate::pb::service::portfolio::portfolio_service_client::PortfolioServiceClient;
-use crate::AppState;
-use philand_error::ErrorEnvelope as ErrorResponse;
 
 type ApiResult<T> = Result<T, (StatusCode, Json<ErrorResponse>)>;
 
@@ -120,14 +121,15 @@ async fn get_portfolio_summary(
     State(state): State<Arc<AppState>>,
     Path(budget_id): Path<String>,
     _q: Query<SourceQuery>,
+    headers: HeaderMap,
 ) -> ApiResult<Json<serde_json::Value>> {
     if _q.source.as_deref() == Some("legacy") {
-        return legacy_portfolio_summary(&state, &budget_id).await;
+        return legacy_portfolio_summary(&state, &budget_id, &headers).await;
     }
     let mut client = connect(&state).await?;
-    let req = GrpcRequest::new(pb::GetPortfolioSummaryRequest {
+    let req = make_req(&headers, pb::GetPortfolioSummaryRequest {
         budget_id: budget_id.clone(),
-    });
+    })?;
     let resp = client.get_portfolio_summary(req).await.map_err(into_api_err)?;
     Ok(Json(to_json_or_log(
         &resp.into_inner(),
@@ -140,16 +142,17 @@ async fn list_assets(
     Path(budget_id): Path<String>,
     Query(p): Query<PageQuery>,
     _s: Query<SourceQuery>,
+    headers: HeaderMap,
 ) -> ApiResult<Json<serde_json::Value>> {
     if _s.source.as_deref() == Some("legacy") {
-        return legacy_list_assets(&state, &budget_id).await;
+        return legacy_list_assets(&state, &budget_id, &headers).await;
     }
     let mut client = connect(&state).await?;
-    let req = GrpcRequest::new(pb::ListAssetsRequest {
+    let req = make_req(&headers, pb::ListAssetsRequest {
         budget_id: budget_id.clone(),
         page: p.page.unwrap_or(0),
         page_size: p.page_size.unwrap_or(0),
-    });
+    })?;
     let resp = client.list_assets(req).await.map_err(into_api_err)?;
     Ok(Json(to_json_or_log(&resp.into_inner(), "ListAssetsResponse")))
 }
@@ -159,6 +162,7 @@ async fn list_assets(
 async fn legacy_portfolio_summary(
     _state: &Arc<AppState>,
     _budget_id: &str,
+    _headers: &HeaderMap,
 ) -> ApiResult<Json<serde_json::Value>> {
     Err((
         StatusCode::SERVICE_UNAVAILABLE,
@@ -173,6 +177,7 @@ async fn legacy_portfolio_summary(
 async fn legacy_list_assets(
     _state: &Arc<AppState>,
     _budget_id: &str,
+    _headers: &HeaderMap,
 ) -> ApiResult<Json<serde_json::Value>> {
     Err((
         StatusCode::SERVICE_UNAVAILABLE,
@@ -187,12 +192,10 @@ async fn legacy_list_assets(
 async fn get_asset(
     State(state): State<Arc<AppState>>,
     Path((budget_id, asset_id)): Path<(String, String)>,
+    headers: HeaderMap,
 ) -> ApiResult<Json<pb::GetAssetResponse>> {
     let mut client = connect(&state).await?;
-    let req = GrpcRequest::new(pb::GetAssetRequest {
-        budget_id,
-        asset_id,
-    });
+    let req = make_req(&headers, pb::GetAssetRequest { budget_id, asset_id })?;
     let resp = client.get_asset(req).await.map_err(into_api_err)?;
     Ok(Json(resp.into_inner()))
 }
@@ -200,16 +203,19 @@ async fn get_asset(
 async fn update_asset_metadata(
     State(state): State<Arc<AppState>>,
     Path((budget_id, asset_id)): Path<(String, String)>,
+    headers: HeaderMap,
     Json(body): Json<pb::UpdateAssetMetadataRequest>,
 ) -> ApiResult<Json<pb::PortfolioAsset>> {
     let mut client = connect(&state).await?;
-    let mut req = GrpcRequest::new(pb::UpdateAssetMetadataRequest {
-        budget_id,
-        asset_id,
-        display_name: body.display_name,
-        notes: body.notes,
-    });
-    inject_auth_meta(&mut req);
+    let req = make_req(
+        &headers,
+        pb::UpdateAssetMetadataRequest {
+            budget_id,
+            asset_id,
+            display_name: body.display_name,
+            notes: body.notes,
+        },
+    )?;
     let resp = client.update_asset_metadata(req).await.map_err(into_api_err)?;
     Ok(Json(resp.into_inner()))
 }
@@ -217,13 +223,10 @@ async fn update_asset_metadata(
 async fn archive_asset(
     State(state): State<Arc<AppState>>,
     Path((budget_id, asset_id)): Path<(String, String)>,
+    headers: HeaderMap,
 ) -> ApiResult<Json<pb::PortfolioAsset>> {
     let mut client = connect(&state).await?;
-    let mut req = GrpcRequest::new(pb::ArchiveAssetRequest {
-        budget_id,
-        asset_id,
-    });
-    inject_auth_meta(&mut req);
+    let req = make_req(&headers, pb::ArchiveAssetRequest { budget_id, asset_id })?;
     let resp = client.archive_asset(req).await.map_err(into_api_err)?;
     Ok(Json(resp.into_inner()))
 }
@@ -231,44 +234,59 @@ async fn archive_asset(
 async fn create_savings_account(
     State(state): State<Arc<AppState>>,
     Path(budget_id): Path<String>,
+    headers: HeaderMap,
     Json(body): Json<pb::CreateSavingsAccountRequest>,
 ) -> ApiResult<Json<pb::PortfolioAsset>> {
     let mut client = connect(&state).await?;
-    let mut req = GrpcRequest::new(pb::CreateSavingsAccountRequest {
-        budget_id,
-        ..body
-    });
-    inject_auth_meta(&mut req);
-    let resp = client.create_savings_account(req).await.map_err(into_api_err)?;
+    let req = make_req(
+        &headers,
+        pb::CreateSavingsAccountRequest {
+            budget_id,
+            ..body
+        },
+    )?;
+    let resp = client
+        .create_savings_account(req)
+        .await
+        .map_err(into_api_err)?;
     Ok(Json(resp.into_inner()))
 }
 
 async fn create_fixed_deposit(
     State(state): State<Arc<AppState>>,
     Path(budget_id): Path<String>,
+    headers: HeaderMap,
     Json(body): Json<pb::CreateFixedDepositRequest>,
 ) -> ApiResult<Json<pb::PortfolioAsset>> {
     let mut client = connect(&state).await?;
-    let mut req = GrpcRequest::new(pb::CreateFixedDepositRequest {
-        budget_id,
-        ..body
-    });
-    inject_auth_meta(&mut req);
-    let resp = client.create_fixed_deposit(req).await.map_err(into_api_err)?;
+    let req = make_req(
+        &headers,
+        pb::CreateFixedDepositRequest {
+            budget_id,
+            ..body
+        },
+    )?;
+    let resp = client
+        .create_fixed_deposit(req)
+        .await
+        .map_err(into_api_err)?;
     Ok(Json(resp.into_inner()))
 }
 
 async fn create_gold_lot(
     State(state): State<Arc<AppState>>,
     Path(budget_id): Path<String>,
+    headers: HeaderMap,
     Json(body): Json<pb::CreateGoldLotRequest>,
 ) -> ApiResult<Json<pb::PortfolioAsset>> {
     let mut client = connect(&state).await?;
-    let mut req = GrpcRequest::new(pb::CreateGoldLotRequest {
-        budget_id,
-        ..body
-    });
-    inject_auth_meta(&mut req);
+    let req = make_req(
+        &headers,
+        pb::CreateGoldLotRequest {
+            budget_id,
+            ..body
+        },
+    )?;
     let resp = client.create_gold_lot(req).await.map_err(into_api_err)?;
     Ok(Json(resp.into_inner()))
 }
@@ -276,29 +294,38 @@ async fn create_gold_lot(
 async fn create_stock_lot(
     State(state): State<Arc<AppState>>,
     Path(budget_id): Path<String>,
+    headers: HeaderMap,
     Json(body): Json<pb::CreateStockLotRequest>,
 ) -> ApiResult<Json<pb::PortfolioAsset>> {
     let mut client = connect(&state).await?;
-    let mut req = GrpcRequest::new(pb::CreateStockLotRequest {
-        budget_id,
-        ..body
-    });
-    inject_auth_meta(&mut req);
-    let resp = client.create_stock_lot(req).await.map_err(into_api_err)?;
+    let req = make_req(
+        &headers,
+        pb::CreateStockLotRequest {
+            budget_id,
+            ..body
+        },
+    )?;
+    let resp = client
+        .create_stock_lot(req)
+        .await
+        .map_err(into_api_err)?;
     Ok(Json(resp.into_inner()))
 }
 
 async fn create_etf_lot(
     State(state): State<Arc<AppState>>,
     Path(budget_id): Path<String>,
+    headers: HeaderMap,
     Json(body): Json<pb::CreateEtfLotRequest>,
 ) -> ApiResult<Json<pb::PortfolioAsset>> {
     let mut client = connect(&state).await?;
-    let mut req = GrpcRequest::new(pb::CreateEtfLotRequest {
-        budget_id,
-        ..body
-    });
-    inject_auth_meta(&mut req);
+    let req = make_req(
+        &headers,
+        pb::CreateEtfLotRequest {
+            budget_id,
+            ..body
+        },
+    )?;
     let resp = client.create_etf_lot(req).await.map_err(into_api_err)?;
     Ok(Json(resp.into_inner()))
 }
@@ -306,30 +333,39 @@ async fn create_etf_lot(
 async fn create_crypto_lot(
     State(state): State<Arc<AppState>>,
     Path(budget_id): Path<String>,
+    headers: HeaderMap,
     Json(body): Json<pb::CreateCryptoLotRequest>,
 ) -> ApiResult<Json<pb::PortfolioAsset>> {
     let mut client = connect(&state).await?;
-    let mut req = GrpcRequest::new(pb::CreateCryptoLotRequest {
-        budget_id,
-        ..body
-    });
-    inject_auth_meta(&mut req);
-    let resp = client.create_crypto_lot(req).await.map_err(into_api_err)?;
+    let req = make_req(
+        &headers,
+        pb::CreateCryptoLotRequest {
+            budget_id,
+            ..body
+        },
+    )?;
+    let resp = client
+        .create_crypto_lot(req)
+        .await
+        .map_err(into_api_err)?;
     Ok(Json(resp.into_inner()))
 }
 
 async fn record_price_observation(
     State(state): State<Arc<AppState>>,
     Path((budget_id, asset_id)): Path<(String, String)>,
+    headers: HeaderMap,
     Json(body): Json<pb::RecordPriceObservationRequest>,
 ) -> ApiResult<Json<pb::PriceObservation>> {
     let mut client = connect(&state).await?;
-    let mut req = GrpcRequest::new(pb::RecordPriceObservationRequest {
-        budget_id,
-        asset_id,
-        ..body
-    });
-    inject_auth_meta(&mut req);
+    let req = make_req(
+        &headers,
+        pb::RecordPriceObservationRequest {
+            budget_id,
+            asset_id,
+            ..body
+        },
+    )?;
     let resp = client
         .record_price_observation(req)
         .await
@@ -341,13 +377,17 @@ async fn list_observations(
     State(state): State<Arc<AppState>>,
     Path((budget_id, asset_id)): Path<(String, String)>,
     Query(q): Query<LimitQuery>,
+    headers: HeaderMap,
 ) -> ApiResult<Json<pb::ListPriceObservationsResponse>> {
     let mut client = connect(&state).await?;
-    let req = GrpcRequest::new(pb::ListPriceObservationsRequest {
-        budget_id,
-        asset_id,
-        limit: q.limit.unwrap_or(50),
-    });
+    let req = make_req(
+        &headers,
+        pb::ListPriceObservationsRequest {
+            budget_id,
+            asset_id,
+            limit: q.limit.unwrap_or(50),
+        },
+    )?;
     let resp = client
         .list_price_observations(req)
         .await
@@ -359,29 +399,39 @@ async fn list_activity(
     State(state): State<Arc<AppState>>,
     Path((budget_id, asset_id)): Path<(String, String)>,
     Query(q): Query<LimitQuery>,
+    headers: HeaderMap,
 ) -> ApiResult<Json<pb::ListAssetActivityResponse>> {
     let mut client = connect(&state).await?;
-    let req = GrpcRequest::new(pb::ListAssetActivityRequest {
-        budget_id,
-        asset_id,
-        limit: q.limit.unwrap_or(50),
-    });
-    let resp = client.list_asset_activity(req).await.map_err(into_api_err)?;
+    let req = make_req(
+        &headers,
+        pb::ListAssetActivityRequest {
+            budget_id,
+            asset_id,
+            limit: q.limit.unwrap_or(50),
+        },
+    )?;
+    let resp = client
+        .list_asset_activity(req)
+        .await
+        .map_err(into_api_err)?;
     Ok(Json(resp.into_inner()))
 }
 
 async fn record_stock_disposal(
     State(state): State<Arc<AppState>>,
     Path((budget_id, asset_id)): Path<(String, String)>,
+    headers: HeaderMap,
     Json(body): Json<pb::RecordStockDisposalRequest>,
 ) -> ApiResult<Json<pb::PortfolioAsset>> {
     let mut client = connect(&state).await?;
-    let mut req = GrpcRequest::new(pb::RecordStockDisposalRequest {
-        budget_id,
-        asset_id,
-        ..body
-    });
-    inject_auth_meta(&mut req);
+    let req = make_req(
+        &headers,
+        pb::RecordStockDisposalRequest {
+            budget_id,
+            asset_id,
+            ..body
+        },
+    )?;
     let resp = client
         .record_stock_disposal(req)
         .await
@@ -390,7 +440,7 @@ async fn record_stock_disposal(
 }
 
 // ---------------------------------------------------------------------------
-// gRPC client helpers
+// gRPC client + auth helpers
 // ---------------------------------------------------------------------------
 
 async fn connect(
@@ -402,17 +452,84 @@ async fn connect(
         .map_err(|e| internal_error(format!("connect: {e}")))
 }
 
-/// Placeholder for future auth metadata forwarding. The current gateway
-/// does not extract a JWT subject for portfolio routes; auth comes from
-/// the bearer token sent upstream to the Budget gRPC service, which
-/// validates it via the existing identity middleware. Once a unified
-/// auth middleware lands for portfolio, populate x-user-id/x-user-type
-/// here from request extensions.
-fn inject_auth_meta<T>(_req: &mut GrpcRequest<T>) {
-    // Placeholder: auth metadata is forwarded via the bearer token sent upstream.
-    // The Budget gRPC service validates it via existing identity middleware.
-    // TODO: populate x-user-id/x-user-type from request extensions when unified auth lands.
-    let _ = MetadataValue::<tonic::metadata::Ascii>::from_static("");
+/// Forward inbound HTTP bearer to the gRPC upstream, decoding the JWT to
+/// populate x-user-id / x-user-type / x-service-actor metadata. Mirrors
+/// `gateway::budget::with_user` so the budget PortfolioService impl
+/// receives the same auth context as the rest of the budget routes.
+fn make_req<T>(
+    headers: &HeaderMap,
+    body: T,
+) -> Result<GrpcRequest<T>, (StatusCode, Json<ErrorResponse>)> {
+    let auth = headers
+        .get("authorization")
+        .and_then(|v| v.to_str().ok())
+        .ok_or_else(|| unauth("Missing Authorization header"))?;
+
+    let mut grpc_req = GrpcRequest::new(body);
+    let value = MetadataValue::try_from(auth).map_err(|_| unauth("Invalid Authorization header"))?;
+    grpc_req.metadata_mut().insert("authorization", value);
+
+    // Strip any inbound service-actor header — clients never escalate.
+    grpc_req.metadata_mut().remove("x-service-actor");
+
+    if let Some(user_id) = decode_sub(auth) {
+        if let Ok(v) = MetadataValue::try_from(user_id.as_str()) {
+            grpc_req.metadata_mut().insert("x-user-id", v);
+        }
+    }
+    if let Some(user_type) = decode_user_type(auth) {
+        if let Ok(v) = MetadataValue::try_from(user_type.as_str()) {
+            grpc_req.metadata_mut().insert("x-user-type", v);
+        }
+        if user_type == "super_admin" {
+            if let Ok(v) = MetadataValue::try_from("true") {
+                grpc_req.metadata_mut().insert("x-service-actor", v);
+            }
+        }
+    }
+
+    Ok(grpc_req)
+}
+
+fn unauth(msg: &str) -> (StatusCode, Json<ErrorResponse>) {
+    (
+        StatusCode::UNAUTHORIZED,
+        Json(ErrorResponse {
+            code: "unauthenticated".into(),
+            message: msg.to_string(),
+            details: vec![],
+        }),
+    )
+}
+
+/// Decode the `sub` claim from a Bearer JWT without signature verification.
+/// Matches the format the identity service signs with `JWT_SECRET`.
+fn decode_sub(bearer: &str) -> Option<String> {
+    let token = bearer.strip_prefix("Bearer ")?;
+    let parts: Vec<&str> = token.split('.').collect();
+    if parts.len() != 3 {
+        return None;
+    }
+    let payload = base64_url_decode(parts[1])?;
+    let v: serde_json::Value = serde_json::from_slice(&payload).ok()?;
+    v.get("sub").and_then(|v| v.as_str()).map(String::from)
+}
+
+fn decode_user_type(bearer: &str) -> Option<String> {
+    let token = bearer.strip_prefix("Bearer ")?;
+    let parts: Vec<&str> = token.split('.').collect();
+    if parts.len() != 3 {
+        return None;
+    }
+    let payload = base64_url_decode(parts[1])?;
+    let v: serde_json::Value = serde_json::from_slice(&payload).ok()?;
+    v.get("user_type")
+        .and_then(|v| v.as_str())
+        .map(String::from)
+}
+
+fn base64_url_decode(s: &str) -> Option<Vec<u8>> {
+    URL_SAFE_NO_PAD.decode(s).ok()
 }
 
 fn into_api_err(e: tonic::Status) -> (StatusCode, Json<ErrorResponse>) {
