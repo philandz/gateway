@@ -45,6 +45,40 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     tonic_build::configure()
         .build_server(true)
         .type_attribute(".", "#[derive(serde::Serialize, serde::Deserialize)]")
+        // Make string fields optional in JSON deserialization so callers can
+        // omit fields the gateway will fill from path params (e.g. budget_id).
+        .type_attribute(
+            ".service.portfolio.CreateSavingsAccountRequest",
+            "#[serde(default)]",
+        )
+        .type_attribute(
+            ".service.portfolio.CreateFixedDepositRequest",
+            "#[serde(default)]",
+        )
+        .type_attribute(
+            ".service.portfolio.CreateGoldLotRequest",
+            "#[serde(default)]",
+        )
+        .type_attribute(
+            ".service.portfolio.CreateStockLotRequest",
+            "#[serde(default)]",
+        )
+        .type_attribute(
+            ".service.portfolio.CreateEtfLotRequest",
+            "#[serde(default)]",
+        )
+        .type_attribute(
+            ".service.portfolio.CreateCryptoLotRequest",
+            "#[serde(default)]",
+        )
+        .type_attribute(
+            ".service.portfolio.RecordPriceObservationRequest",
+            "#[serde(default)]",
+        )
+        .type_attribute(
+            ".service.portfolio.RecordStockDisposalRequest",
+            "#[serde(default)]",
+        )
         .compile_protos(&file_refs, &include_refs)?;
     Ok(())
 }

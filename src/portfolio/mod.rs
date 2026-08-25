@@ -235,13 +235,13 @@ async fn create_savings_account(
     State(state): State<Arc<AppState>>,
     Path(budget_id): Path<String>,
     headers: HeaderMap,
-    Json(body): Json<pb::CreateSavingsAccountRequest>,
+    Json(mut body): Json<pb::CreateSavingsAccountRequest>,
 ) -> ApiResult<Json<pb::PortfolioAsset>> {
     let mut client = connect(&state).await?;
+    body.budget_id = budget_id;
     let req = make_req(
         &headers,
         pb::CreateSavingsAccountRequest {
-            budget_id,
             ..body
         },
     )?;
@@ -256,13 +256,13 @@ async fn create_fixed_deposit(
     State(state): State<Arc<AppState>>,
     Path(budget_id): Path<String>,
     headers: HeaderMap,
-    Json(body): Json<pb::CreateFixedDepositRequest>,
+    Json(mut body): Json<pb::CreateFixedDepositRequest>,
 ) -> ApiResult<Json<pb::PortfolioAsset>> {
     let mut client = connect(&state).await?;
+    body.budget_id = budget_id;
     let req = make_req(
         &headers,
         pb::CreateFixedDepositRequest {
-            budget_id,
             ..body
         },
     )?;
@@ -277,13 +277,13 @@ async fn create_gold_lot(
     State(state): State<Arc<AppState>>,
     Path(budget_id): Path<String>,
     headers: HeaderMap,
-    Json(body): Json<pb::CreateGoldLotRequest>,
+    Json(mut body): Json<pb::CreateGoldLotRequest>,
 ) -> ApiResult<Json<pb::PortfolioAsset>> {
     let mut client = connect(&state).await?;
+    body.budget_id = budget_id;
     let req = make_req(
         &headers,
         pb::CreateGoldLotRequest {
-            budget_id,
             ..body
         },
     )?;
@@ -295,13 +295,13 @@ async fn create_stock_lot(
     State(state): State<Arc<AppState>>,
     Path(budget_id): Path<String>,
     headers: HeaderMap,
-    Json(body): Json<pb::CreateStockLotRequest>,
+    Json(mut body): Json<pb::CreateStockLotRequest>,
 ) -> ApiResult<Json<pb::PortfolioAsset>> {
     let mut client = connect(&state).await?;
+    body.budget_id = budget_id;
     let req = make_req(
         &headers,
         pb::CreateStockLotRequest {
-            budget_id,
             ..body
         },
     )?;
@@ -316,13 +316,13 @@ async fn create_etf_lot(
     State(state): State<Arc<AppState>>,
     Path(budget_id): Path<String>,
     headers: HeaderMap,
-    Json(body): Json<pb::CreateEtfLotRequest>,
+    Json(mut body): Json<pb::CreateEtfLotRequest>,
 ) -> ApiResult<Json<pb::PortfolioAsset>> {
     let mut client = connect(&state).await?;
+    body.budget_id = budget_id;
     let req = make_req(
         &headers,
         pb::CreateEtfLotRequest {
-            budget_id,
             ..body
         },
     )?;
@@ -334,13 +334,13 @@ async fn create_crypto_lot(
     State(state): State<Arc<AppState>>,
     Path(budget_id): Path<String>,
     headers: HeaderMap,
-    Json(body): Json<pb::CreateCryptoLotRequest>,
+    Json(mut body): Json<pb::CreateCryptoLotRequest>,
 ) -> ApiResult<Json<pb::PortfolioAsset>> {
     let mut client = connect(&state).await?;
+    body.budget_id = budget_id;
     let req = make_req(
         &headers,
         pb::CreateCryptoLotRequest {
-            budget_id,
             ..body
         },
     )?;
@@ -355,13 +355,13 @@ async fn record_price_observation(
     State(state): State<Arc<AppState>>,
     Path((budget_id, asset_id)): Path<(String, String)>,
     headers: HeaderMap,
-    Json(body): Json<pb::RecordPriceObservationRequest>,
+    Json(mut body): Json<pb::RecordPriceObservationRequest>,
 ) -> ApiResult<Json<pb::PriceObservation>> {
     let mut client = connect(&state).await?;
+    body.budget_id = budget_id;
     let req = make_req(
         &headers,
         pb::RecordPriceObservationRequest {
-            budget_id,
             asset_id,
             ..body
         },
@@ -421,13 +421,13 @@ async fn record_stock_disposal(
     State(state): State<Arc<AppState>>,
     Path((budget_id, asset_id)): Path<(String, String)>,
     headers: HeaderMap,
-    Json(body): Json<pb::RecordStockDisposalRequest>,
+    Json(mut body): Json<pb::RecordStockDisposalRequest>,
 ) -> ApiResult<Json<pb::PortfolioAsset>> {
     let mut client = connect(&state).await?;
+    body.budget_id = budget_id;
     let req = make_req(
         &headers,
         pb::RecordStockDisposalRequest {
-            budget_id,
             asset_id,
             ..body
         },
