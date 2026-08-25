@@ -101,6 +101,15 @@ async fn main() -> anyhow::Result<()> {
     let addr: SocketAddr = format!("{}:{}", config.host, config.port).parse()?;
     tracing::info!("API Gateway listening on {}", addr);
 
+    // Install metrics recorder and spawn warn task.
+    let metrics_handle = philand_storage::metrics::install_recorder().await?;
+    tokio::spawn(philand_storage::metrics::spawn_warn_task(
+        philand_configs::MetricsConfig::from_env().acquire_warn_p99_ms,
+    ));
+
+    let app = app
+        .route("/metrics", get(move || async move { metrics_handle.render() }));
+
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     axum::serve(listener, app).await?;
 
