@@ -32,7 +32,8 @@ async fn main() -> anyhow::Result<()> {
         env::var("MEDIA_GRPC_URL").unwrap_or_else(|_| "http://127.0.0.1:50052".to_string());
     let budget_grpc_url =
         env::var("BUDGET_GRPC_URL").unwrap_or_else(|_| "http://127.0.0.1:50103".to_string());
-    let portfolio_grpc_url = env::var("PORTFOLIO_GRPC_URL").unwrap_or_else(|_| budget_grpc_url.clone());
+    let portfolio_grpc_url =
+        env::var("PORTFOLIO_GRPC_URL").unwrap_or_else(|_| budget_grpc_url.clone());
     let category_grpc_url =
         env::var("CATEGORY_GRPC_URL").unwrap_or_else(|_| "http://127.0.0.1:50104".to_string());
     let entry_grpc_url =
@@ -97,7 +98,10 @@ async fn main() -> anyhow::Result<()> {
             "/public/{*path}",
             any(gateway::proxy::media_public_proxy_handler),
         )
-        .route("/metrics", get(move || async move { metrics_handle.render() }))
+        .route(
+            "/metrics",
+            get(move || async move { metrics_handle.render() }),
+        )
         .nest("/api", api_router)
         .merge(swagger_router)
         .layer(TraceLayer::new_for_http())

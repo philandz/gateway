@@ -40,10 +40,7 @@ pub fn router() -> Router<Arc<AppState>> {
             "/budgets/{budget_id}/portfolio/summary",
             get(get_portfolio_summary),
         )
-        .route(
-            "/budgets/{budget_id}/portfolio/assets",
-            get(list_assets),
-        )
+        .route("/budgets/{budget_id}/portfolio/assets", get(list_assets))
         .route(
             "/budgets/{budget_id}/portfolio/assets/{asset_id}",
             get(get_asset).patch(update_asset_metadata),
@@ -127,10 +124,16 @@ async fn get_portfolio_summary(
         return legacy_portfolio_summary(&state, &budget_id, &headers).await;
     }
     let mut client = connect(&state).await?;
-    let req = make_req(&headers, pb::GetPortfolioSummaryRequest {
-        budget_id: budget_id.clone(),
-    })?;
-    let resp = client.get_portfolio_summary(req).await.map_err(into_api_err)?;
+    let req = make_req(
+        &headers,
+        pb::GetPortfolioSummaryRequest {
+            budget_id: budget_id.clone(),
+        },
+    )?;
+    let resp = client
+        .get_portfolio_summary(req)
+        .await
+        .map_err(into_api_err)?;
     Ok(Json(to_json_or_log(
         &resp.into_inner(),
         "GetPortfolioSummaryResponse",
@@ -148,13 +151,19 @@ async fn list_assets(
         return legacy_list_assets(&state, &budget_id, &headers).await;
     }
     let mut client = connect(&state).await?;
-    let req = make_req(&headers, pb::ListAssetsRequest {
-        budget_id: budget_id.clone(),
-        page: p.page.unwrap_or(0),
-        page_size: p.page_size.unwrap_or(0),
-    })?;
+    let req = make_req(
+        &headers,
+        pb::ListAssetsRequest {
+            budget_id: budget_id.clone(),
+            page: p.page.unwrap_or(0),
+            page_size: p.page_size.unwrap_or(0),
+        },
+    )?;
     let resp = client.list_assets(req).await.map_err(into_api_err)?;
-    Ok(Json(to_json_or_log(&resp.into_inner(), "ListAssetsResponse")))
+    Ok(Json(to_json_or_log(
+        &resp.into_inner(),
+        "ListAssetsResponse",
+    )))
 }
 
 /// Legacy monolith is gone (strangler complete); return 503 so frontend
@@ -195,7 +204,13 @@ async fn get_asset(
     headers: HeaderMap,
 ) -> ApiResult<Json<pb::GetAssetResponse>> {
     let mut client = connect(&state).await?;
-    let req = make_req(&headers, pb::GetAssetRequest { budget_id, asset_id })?;
+    let req = make_req(
+        &headers,
+        pb::GetAssetRequest {
+            budget_id,
+            asset_id,
+        },
+    )?;
     let resp = client.get_asset(req).await.map_err(into_api_err)?;
     Ok(Json(resp.into_inner()))
 }
@@ -216,7 +231,10 @@ async fn update_asset_metadata(
             notes: body.notes,
         },
     )?;
-    let resp = client.update_asset_metadata(req).await.map_err(into_api_err)?;
+    let resp = client
+        .update_asset_metadata(req)
+        .await
+        .map_err(into_api_err)?;
     Ok(Json(resp.into_inner()))
 }
 
@@ -226,7 +244,13 @@ async fn archive_asset(
     headers: HeaderMap,
 ) -> ApiResult<Json<pb::PortfolioAsset>> {
     let mut client = connect(&state).await?;
-    let req = make_req(&headers, pb::ArchiveAssetRequest { budget_id, asset_id })?;
+    let req = make_req(
+        &headers,
+        pb::ArchiveAssetRequest {
+            budget_id,
+            asset_id,
+        },
+    )?;
     let resp = client.archive_asset(req).await.map_err(into_api_err)?;
     Ok(Json(resp.into_inner()))
 }
@@ -239,12 +263,7 @@ async fn create_savings_account(
 ) -> ApiResult<Json<pb::PortfolioAsset>> {
     let mut client = connect(&state).await?;
     body.budget_id = budget_id;
-    let req = make_req(
-        &headers,
-        pb::CreateSavingsAccountRequest {
-            ..body
-        },
-    )?;
+    let req = make_req(&headers, pb::CreateSavingsAccountRequest { ..body })?;
     let resp = client
         .create_savings_account(req)
         .await
@@ -260,12 +279,7 @@ async fn create_fixed_deposit(
 ) -> ApiResult<Json<pb::PortfolioAsset>> {
     let mut client = connect(&state).await?;
     body.budget_id = budget_id;
-    let req = make_req(
-        &headers,
-        pb::CreateFixedDepositRequest {
-            ..body
-        },
-    )?;
+    let req = make_req(&headers, pb::CreateFixedDepositRequest { ..body })?;
     let resp = client
         .create_fixed_deposit(req)
         .await
@@ -281,12 +295,7 @@ async fn create_gold_lot(
 ) -> ApiResult<Json<pb::PortfolioAsset>> {
     let mut client = connect(&state).await?;
     body.budget_id = budget_id;
-    let req = make_req(
-        &headers,
-        pb::CreateGoldLotRequest {
-            ..body
-        },
-    )?;
+    let req = make_req(&headers, pb::CreateGoldLotRequest { ..body })?;
     let resp = client.create_gold_lot(req).await.map_err(into_api_err)?;
     Ok(Json(resp.into_inner()))
 }
@@ -299,16 +308,8 @@ async fn create_stock_lot(
 ) -> ApiResult<Json<pb::PortfolioAsset>> {
     let mut client = connect(&state).await?;
     body.budget_id = budget_id;
-    let req = make_req(
-        &headers,
-        pb::CreateStockLotRequest {
-            ..body
-        },
-    )?;
-    let resp = client
-        .create_stock_lot(req)
-        .await
-        .map_err(into_api_err)?;
+    let req = make_req(&headers, pb::CreateStockLotRequest { ..body })?;
+    let resp = client.create_stock_lot(req).await.map_err(into_api_err)?;
     Ok(Json(resp.into_inner()))
 }
 
@@ -320,12 +321,7 @@ async fn create_etf_lot(
 ) -> ApiResult<Json<pb::PortfolioAsset>> {
     let mut client = connect(&state).await?;
     body.budget_id = budget_id;
-    let req = make_req(
-        &headers,
-        pb::CreateEtfLotRequest {
-            ..body
-        },
-    )?;
+    let req = make_req(&headers, pb::CreateEtfLotRequest { ..body })?;
     let resp = client.create_etf_lot(req).await.map_err(into_api_err)?;
     Ok(Json(resp.into_inner()))
 }
@@ -338,16 +334,8 @@ async fn create_crypto_lot(
 ) -> ApiResult<Json<pb::PortfolioAsset>> {
     let mut client = connect(&state).await?;
     body.budget_id = budget_id;
-    let req = make_req(
-        &headers,
-        pb::CreateCryptoLotRequest {
-            ..body
-        },
-    )?;
-    let resp = client
-        .create_crypto_lot(req)
-        .await
-        .map_err(into_api_err)?;
+    let req = make_req(&headers, pb::CreateCryptoLotRequest { ..body })?;
+    let resp = client.create_crypto_lot(req).await.map_err(into_api_err)?;
     Ok(Json(resp.into_inner()))
 }
 
@@ -361,10 +349,7 @@ async fn record_price_observation(
     body.budget_id = budget_id;
     let req = make_req(
         &headers,
-        pb::RecordPriceObservationRequest {
-            asset_id,
-            ..body
-        },
+        pb::RecordPriceObservationRequest { asset_id, ..body },
     )?;
     let resp = client
         .record_price_observation(req)
@@ -427,10 +412,7 @@ async fn record_stock_disposal(
     body.budget_id = budget_id;
     let req = make_req(
         &headers,
-        pb::RecordStockDisposalRequest {
-            asset_id,
-            ..body
-        },
+        pb::RecordStockDisposalRequest { asset_id, ..body },
     )?;
     let resp = client
         .record_stock_disposal(req)
@@ -466,7 +448,8 @@ fn make_req<T>(
         .ok_or_else(|| unauth("Missing Authorization header"))?;
 
     let mut grpc_req = GrpcRequest::new(body);
-    let value = MetadataValue::try_from(auth).map_err(|_| unauth("Invalid Authorization header"))?;
+    let value =
+        MetadataValue::try_from(auth).map_err(|_| unauth("Invalid Authorization header"))?;
     grpc_req.metadata_mut().insert("authorization", value);
 
     // Strip any inbound service-actor header — clients never escalate.

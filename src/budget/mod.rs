@@ -775,7 +775,11 @@ where
     let value = serde_json::Value::deserialize(deserializer)?;
     match value {
         serde_json::Value::Null => Ok(None),
-        serde_json::Value::Number(n) => n.as_i64().map(|i| i as i32).map(Some).ok_or_else(|| D::Error::custom("asset_type must be an integer")),
+        serde_json::Value::Number(n) => n
+            .as_i64()
+            .map(|i| i as i32)
+            .map(Some)
+            .ok_or_else(|| D::Error::custom("asset_type must be an integer")),
         serde_json::Value::String(s) => match s.to_ascii_lowercase().as_str() {
             "" => Ok(None),
             "savings_deposit" | "savings" | "savingsaccount" | "savings_account" => Ok(Some(1)),
