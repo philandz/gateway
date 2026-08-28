@@ -1,13 +1,12 @@
 use axum::{extract::State, routing::get, Json, Router};
 use serde_json::{json, Value};
 use std::sync::Arc;
-use utoipa_swagger_ui::{Config, SwaggerUi, Url};
 
 use crate::AppState;
 
 /// Placeholder OpenAPI spec served directly by the gateway.
 /// As microservices come online, replace these with real downstream specs.
-async fn gateway_openapi_spec() -> Json<Value> {
+async fn gateway_openapi_spec(State(_): State<Arc<AppState>>) -> Json<Value> {
     Json(with_bearer_auth(json!({
         "openapi": "3.0.3",
         "info": {
@@ -53,7 +52,7 @@ async fn identity_openapi_spec(State(state): State<Arc<AppState>>) -> Json<Value
     Json(with_bearer_auth(identity_stub_spec()))
 }
 
-async fn media_openapi_spec() -> Json<Value> {
+async fn media_openapi_spec(State(_): State<Arc<AppState>>) -> Json<Value> {
     Json(with_bearer_auth(media_stub_spec()))
 }
 
@@ -221,19 +220,16 @@ fn with_bearer_auth(mut spec: Value) -> Value {
     spec
 }
 
-/// Creates the Swagger UI router with specs for all available services.
+/// Creates the OpenAPI spec router for all available services.
+///
+/// Mounted at the root level so the spec JSON is reachable at
+/// `/swagger/{service}/openapi.json`. Note: SwaggerUi was previously
+/// merged here, but its internal wildcard route (`/swagger/*`) shadowed
+/// the spec endpoints and surfaced as 404. Keep the UI out of this router
+/// until we can serve it at a distinct prefix (e.g. `/swagger-ui/`).
 pub fn router() -> Router<Arc<AppState>> {
-    let swagger_urls = vec![
-        Url::new("Gateway", "/swagger/gateway/openapi.json"),
-        Url::new("Identity", "/swagger/identity/openapi.json"),
-        Url::new("Media", "/swagger/media/openapi.json"),
-    ];
-
-    let config = Config::new(swagger_urls);
-
     Router::new()
         .route("/swagger/gateway/openapi.json", get(gateway_openapi_spec))
         .route("/swagger/identity/openapi.json", get(identity_openapi_spec))
         .route("/swagger/media/openapi.json", get(media_openapi_spec))
-        .merge(SwaggerUi::new("/swagger").config(config))
 }
