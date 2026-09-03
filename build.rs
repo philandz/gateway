@@ -34,6 +34,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         format!("{proto_prefix}/category/category.proto"),
         format!("{proto_prefix}/entry/entry.proto"),
         format!("{proto_prefix}/sharing/sharing.proto"),
+        format!("{proto_prefix}/portfolio/portfolio.proto"),
         format!("{proto_prefix}/shared/user/user.proto"),
         format!("{proto_prefix}/shared/organization/organization.proto"),
         format!("{proto_prefix}/shared/media/media.proto"),
@@ -43,6 +44,41 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     tonic_build::configure()
         .build_server(true)
+        .type_attribute(".", "#[derive(serde::Serialize, serde::Deserialize)]")
+        // Make string fields optional in JSON deserialization so callers can
+        // omit fields the gateway will fill from path params (e.g. budget_id).
+        .type_attribute(
+            ".service.portfolio.CreateSavingsAccountRequest",
+            "#[serde(default)]",
+        )
+        .type_attribute(
+            ".service.portfolio.CreateFixedDepositRequest",
+            "#[serde(default)]",
+        )
+        .type_attribute(
+            ".service.portfolio.CreateGoldLotRequest",
+            "#[serde(default)]",
+        )
+        .type_attribute(
+            ".service.portfolio.CreateStockLotRequest",
+            "#[serde(default)]",
+        )
+        .type_attribute(
+            ".service.portfolio.CreateEtfLotRequest",
+            "#[serde(default)]",
+        )
+        .type_attribute(
+            ".service.portfolio.CreateCryptoLotRequest",
+            "#[serde(default)]",
+        )
+        .type_attribute(
+            ".service.portfolio.RecordPriceObservationRequest",
+            "#[serde(default)]",
+        )
+        .type_attribute(
+            ".service.portfolio.RecordStockDisposalRequest",
+            "#[serde(default)]",
+        )
         .compile_protos(&file_refs, &include_refs)?;
     Ok(())
 }

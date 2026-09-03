@@ -33,3 +33,6 @@ philand_logging = { package = "logging", path = "../libs/logging" }
 philand_http = { package = "http", path = "../libs/http" }
 philand_error = { package = "error", path = "../libs/error" }
 philand_configs = { package = "configs", path = "../libs/configs" }
+philand_storage = { package = "storage", path = "../libs/storage" }
+metrics-exporter-prometheus = "0.15"
+base64 = "0.22"

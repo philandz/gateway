@@ -52,6 +52,8 @@ pub fn router() -> Router<Arc<AppState>> {
             "/budgets/{budget_id}/participants/{participant_id}",
             delete(revoke_participant),
         )
+        // --- Balances ---
+        .route("/budgets/{budget_id}/balances", get(get_balances))
 }
 
 fn map_status(s: Status) -> (StatusCode, Json<ErrorResponse>) {
@@ -835,6 +837,39 @@ async fn revoke_participant(
     .await
     .map_err(map_status)?;
     Ok(Json(serde_json::json!({ "success": true })))
+}
+
+// ---------------------------------------------------------------------------
+// Balances
+// ---------------------------------------------------------------------------
+
+async fn get_balances(
+    State(state): State<Arc<AppState>>,
+    Path(budget_id): Path<String>,
+    headers: HeaderMap,
+) -> ApiResult<Json<serde_json::Value>> {
+    let mut c = client(&state).await?;
+    let resp = c
+        .get_balances(with_user_or_guest(
+            &headers,
+            pb::GetBalancesRequest { budget_id },
+        )?)
+        .await
+        .map_err(map_status)?
+        .into_inner();
+    let balances: Vec<serde_json::Value> = resp
+        .balances
+        .iter()
+        .map(|b| {
+            serde_json::json!({
+                "user_id":       b.user_id,
+                "display_name":  b.display_name,
+                "email":         b.email,
+                "net_balance":   b.net_balance,
+            })
+        })
+        .collect();
+    Ok(Json(serde_json::json!({ "balances": balances })))
 }
 
 // ---------------------------------------------------------------------------

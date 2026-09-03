@@ -32,6 +32,8 @@ async fn main() -> anyhow::Result<()> {
         env::var("MEDIA_GRPC_URL").unwrap_or_else(|_| "http://127.0.0.1:50052".to_string());
     let budget_grpc_url =
         env::var("BUDGET_GRPC_URL").unwrap_or_else(|_| "http://127.0.0.1:50103".to_string());
+    let portfolio_grpc_url =
+        env::var("PORTFOLIO_GRPC_URL").unwrap_or_else(|_| budget_grpc_url.clone());
     let category_grpc_url =
         env::var("CATEGORY_GRPC_URL").unwrap_or_else(|_| "http://127.0.0.1:50104".to_string());
     let entry_grpc_url =
@@ -47,6 +49,7 @@ async fn main() -> anyhow::Result<()> {
         identity_grpc_url: config.identity_grpc_url,
         media_grpc_url,
         budget_grpc_url,
+        portfolio_grpc_url,
         category_grpc_url,
         entry_grpc_url,
         sharing_grpc_url,
@@ -68,7 +71,8 @@ async fn main() -> anyhow::Result<()> {
             .nest("/budget", gateway::budget::router())
             .nest("/category", gateway::category::router())
             .nest("/entry", gateway::entry::router())
-            .nest("/sharing", gateway::sharing::router()),
+            .nest("/sharing", gateway::sharing::router())
+            .nest("/portfolios", gateway::portfolio::router()),
     }
     .layer(middleware::from_fn(
         gateway::middleware::reject_super_admin_on_user_paths,
@@ -81,11 +85,22 @@ async fn main() -> anyhow::Result<()> {
         gateway::swagger::router().layer(middleware::from_fn(swagger_local_only))
     };
 
+    // Install metrics recorder and spawn warn task before building the Router
+    // so the /metrics route can reference the handle.
+    let metrics_handle = philand_storage::metrics::install_recorder().await?;
+    tokio::spawn(philand_storage::metrics::spawn_warn_task(
+        philand_configs::MetricsConfig::from_env().acquire_warn_p99_ms,
+    ));
+
     let app = Router::new()
         .route("/health", get(|| async { "OK" }))
         .route(
             "/public/{*path}",
             any(gateway::proxy::media_public_proxy_handler),
+        )
+        .route(
+            "/metrics",
+            get(move || async move { metrics_handle.render() }),
         )
         .nest("/api", api_router)
         .merge(swagger_router)
