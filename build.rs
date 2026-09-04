@@ -1,14 +1,28 @@
 use std::path::Path;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let (proto_root, proto_prefix, libs_prefix) =
-        if Path::new("../protobuf/identity/identity.proto").exists() {
-            ("..", "../protobuf", "../libs")
-        } else {
-            (".", "protobuf", "libs")
-        };
+    // Determine where we are being built from.
+    //
+    // The gateway ships its own copy of portfolio.proto locally under
+    // `gateway/protobuf/portfolio/`.  All other protos live at the repo-root
+    // `protobuf/` level.  We detect the build context by testing for the
+    // local portfolio proto.
+    let at_gateway_dir = Path::new("protobuf/portfolio/portfolio.proto").exists();
+
+    // proto_root is the include path that covers the majority of protos.
+    // libs_prefix covers protos under libs/protobuf/.
+    let (proto_root, libs_prefix) = if at_gateway_dir {
+        ("..", "../libs")
+    } else {
+        (".", "libs")
+    };
 
     let mut includes = vec![proto_root.to_string()];
+    // When building from the gateway directory we also add "." as an include so
+    // that the local `gateway/protobuf/portfolio/portfolio.proto` can be found.
+    if at_gateway_dir {
+        includes.push(".".to_string());
+    }
     for candidate in [
         "/usr/include",
         "/usr/local/include",
@@ -27,19 +41,38 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let include_refs: Vec<&str> = includes.iter().map(String::as_str).collect();
 
-    let files = [
-        format!("{proto_prefix}/identity/identity.proto"),
-        format!("{proto_prefix}/media/media.proto"),
-        format!("{proto_prefix}/budget/budget.proto"),
-        format!("{proto_prefix}/category/category.proto"),
-        format!("{proto_prefix}/entry/entry.proto"),
-        format!("{proto_prefix}/sharing/sharing.proto"),
-        format!("{proto_prefix}/portfolio/portfolio.proto"),
-        format!("{proto_prefix}/shared/user/user.proto"),
-        format!("{proto_prefix}/shared/organization/organization.proto"),
-        format!("{proto_prefix}/shared/media/media.proto"),
-        format!("{libs_prefix}/protobuf/common/base.proto"),
-    ];
+    // All protos except portfolio live at proto_root; portfolio lives in the
+    // gateway's local protobuf/ directory (resolved via the "." include above).
+    let files = if at_gateway_dir {
+        vec![
+            format!("{}/protobuf/identity/identity.proto", proto_root),
+            format!("{}/protobuf/media/media.proto", proto_root),
+            format!("{}/protobuf/budget/budget.proto", proto_root),
+            format!("{}/protobuf/category/category.proto", proto_root),
+            format!("{}/protobuf/entry/entry.proto", proto_root),
+            format!("{}/protobuf/sharing/sharing.proto", proto_root),
+            // portfolio.proto is the only proto that lives inside the gateway crate
+            "protobuf/portfolio/portfolio.proto".to_string(),
+            format!("{}/protobuf/shared/user/user.proto", proto_root),
+            format!("{}/protobuf/shared/organization/organization.proto", proto_root),
+            format!("{}/protobuf/shared/media/media.proto", proto_root),
+            format!("{}/protobuf/common/base.proto", libs_prefix),
+        ]
+    } else {
+        vec![
+            format!("{}/protobuf/identity/identity.proto", proto_root),
+            format!("{}/protobuf/media/media.proto", proto_root),
+            format!("{}/protobuf/budget/budget.proto", proto_root),
+            format!("{}/protobuf/category/category.proto", proto_root),
+            format!("{}/protobuf/entry/entry.proto", proto_root),
+            format!("{}/protobuf/sharing/sharing.proto", proto_root),
+            format!("{}/protobuf/portfolio/portfolio.proto", proto_root),
+            format!("{}/protobuf/shared/user/user.proto", proto_root),
+            format!("{}/protobuf/shared/organization/organization.proto", proto_root),
+            format!("{}/protobuf/shared/media/media.proto", proto_root),
+            format!("{}/protobuf/common/base.proto", libs_prefix),
+        ]
+    };
     let file_refs: Vec<&str> = files.iter().map(String::as_str).collect();
 
     tonic_build::configure()

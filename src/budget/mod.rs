@@ -376,6 +376,7 @@ async fn update_budget(
                 budget_id,
                 name,
                 budget_type,
+                is_private: false, // TODO: wire is_private from request body (T1.1)
             },
         )?)
         .await

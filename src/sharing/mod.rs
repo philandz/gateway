@@ -3,7 +3,7 @@ use std::sync::Arc;
 use axum::{
     extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
-    routing::{delete, get, post},
+    routing::{delete, get, patch, post},
     Json, Router,
 };
 use serde::Deserialize;
@@ -52,6 +52,16 @@ pub fn router() -> Router<Arc<AppState>> {
             "/budgets/{budget_id}/participants/{participant_id}",
             delete(revoke_participant),
         )
+        // --- Ownership & roles ---
+        .route(
+            "/budgets/{budget_id}/transfer-ownership",
+            post(transfer_ownership),
+        )
+        .route(
+            "/budgets/{budget_id}/participants/{participant_id}/role",
+            patch(update_member_role),
+        )
+        .route("/budgets/{budget_id}/leave", post(leave_budget))
         // --- Balances ---
         .route("/budgets/{budget_id}/balances", get(get_balances))
 }
@@ -833,6 +843,90 @@ async fn revoke_participant(
             budget_id,
             participant_id,
         },
+    )?)
+    .await
+    .map_err(map_status)?;
+    Ok(Json(serde_json::json!({ "success": true })))
+}
+
+// ---------------------------------------------------------------------------
+// Ownership & roles
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+struct TransferOwnershipBody {
+    to_user_id: String,
+}
+
+async fn transfer_ownership(
+    State(state): State<Arc<AppState>>,
+    Path(budget_id): Path<String>,
+    headers: HeaderMap,
+    Json(body): Json<TransferOwnershipBody>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let mut c = client(&state).await?;
+    let resp = c
+        .transfer_ownership(with_user(
+            &headers,
+            pb::TransferOwnershipRequest {
+                budget_id,
+                to_user_id: body.to_user_id,
+            },
+        )?)
+        .await
+        .map_err(map_status)?
+        .into_inner();
+    let p = resp.participant.as_ref();
+    Ok(Json(serde_json::json!({
+        "user_id":       p.map(|p| &p.user_id).unwrap_or(&String::new()),
+        "display_name":  p.map(|p| &p.display_name).unwrap_or(&String::new()),
+        "email":         p.map(|p| &p.email).unwrap_or(&String::new()),
+        "net_balance":   p.map(|p| p.net_balance).unwrap_or(0),
+    })))
+}
+
+#[derive(Deserialize)]
+struct UpdateMemberRoleBody {
+    role: String,
+}
+
+async fn update_member_role(
+    State(state): State<Arc<AppState>>,
+    Path((budget_id, participant_id)): Path<(String, String)>,
+    headers: HeaderMap,
+    Json(body): Json<UpdateMemberRoleBody>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let mut c = client(&state).await?;
+    let resp = c
+        .update_member_role(with_user(
+            &headers,
+            pb::UpdateMemberRoleRequest {
+                budget_id,
+                participant_id,
+                role: body.role,
+            },
+        )?)
+        .await
+        .map_err(map_status)?
+        .into_inner();
+    let p = resp.participant.as_ref();
+    Ok(Json(serde_json::json!({
+        "user_id":       p.map(|p| &p.user_id).unwrap_or(&String::new()),
+        "display_name":  p.map(|p| &p.display_name).unwrap_or(&String::new()),
+        "email":         p.map(|p| &p.email).unwrap_or(&String::new()),
+        "net_balance":   p.map(|p| p.net_balance).unwrap_or(0),
+    })))
+}
+
+async fn leave_budget(
+    State(state): State<Arc<AppState>>,
+    Path(budget_id): Path<String>,
+    headers: HeaderMap,
+) -> ApiResult<Json<serde_json::Value>> {
+    let mut c = client(&state).await?;
+    c.leave_budget(with_user_or_guest(
+        &headers,
+        pb::LeaveBudgetRequest { budget_id },
     )?)
     .await
     .map_err(map_status)?;
