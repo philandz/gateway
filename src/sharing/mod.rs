@@ -336,6 +336,10 @@ struct MarkSettledBody {
 struct ActivityQuery {
     since: Option<i64>,
     limit: Option<i32>,
+    date_from: Option<i64>,
+    date_to: Option<i64>,
+    actor_user_id: Option<String>,
+    action: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -674,6 +678,10 @@ async fn list_activity(
                 budget_id,
                 since_unix: params.since.unwrap_or(0),
                 limit: params.limit.unwrap_or(50),
+                date_from_unix: params.date_from.unwrap_or(0),
+                date_to_unix: params.date_to.unwrap_or(0),
+                actor_user_id: params.actor_user_id.unwrap_or_default(),
+                action: params.action.unwrap_or_default(),
             },
         )?)
         .await

@@ -3,7 +3,7 @@ use std::{sync::Arc, time::Duration};
 use axum::{
     extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
-    routing::{delete, get, patch, put},
+    routing::{delete, get, patch, post, put},
     Json, Router,
 };
 use serde::{Deserialize, Deserializer};
@@ -24,6 +24,7 @@ pub fn router() -> Router<Arc<AppState>> {
             "/budgets/{budget_id}",
             get(get_budget).patch(update_budget).delete(delete_budget),
         )
+        .route("/budgets/{budget_id}/force-close", post(force_close_budget))
         .route(
             "/budgets/{budget_id}/members",
             get(list_members).post(add_member),
@@ -397,6 +398,20 @@ async fn delete_budget(
     Ok(Json(
         serde_json::json!({"message": "Budget deleted successfully"}),
     ))
+}
+
+async fn force_close_budget(
+    State(state): State<Arc<AppState>>,
+    Path(budget_id): Path<String>,
+    headers: HeaderMap,
+) -> ApiResult<Json<serde_json::Value>> {
+    let mut c = client(&state).await?;
+    let resp = c
+        .force_close_budget(with_user(&headers, pb::ForceCloseBudgetRequest { budget_id })?)
+        .await
+        .map_err(map_status)?
+        .into_inner();
+    Ok(Json(map_budget(resp.budget.as_ref())))
 }
 
 async fn list_budgets(
