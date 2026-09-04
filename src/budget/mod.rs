@@ -59,6 +59,11 @@ pub fn router() -> Router<Arc<AppState>> {
             "/budgets/{budget_id}/invest/portfolio",
             get(get_invest_portfolio_summary),
         )
+        // On-demand portfolio refresh
+        .route(
+            "/budgets/{budget_id}/portfolio/refresh",
+            post(refresh_portfolio),
+        )
         // Price snapshots
         .route(
             "/invest/assets/{asset_id}/snapshots",
@@ -927,6 +932,32 @@ async fn get_invest_portfolio_summary(
         "total_unrealized_pnl": resp.total_unrealized_pnl,
         "total_pnl_pct": resp.total_pnl_pct,
         "assets": assets,
+    })))
+}
+
+async fn refresh_portfolio(
+    State(state): State<Arc<AppState>>,
+    Path(budget_id): Path<String>,
+    headers: HeaderMap,
+) -> ApiResult<Json<serde_json::Value>> {
+    let mut c = client(&state).await?;
+    let resp = c
+        .refresh_portfolio(with_user(
+            &headers,
+            pb::RefreshPortfolioRequest { budget_id },
+        )?)
+        .await
+        .map_err(map_status)?
+        .into_inner();
+    let snapshot = resp.snapshot.as_ref();
+    Ok(Json(serde_json::json!({
+        "budget_id": snapshot.map(|s| &s.budget_id).unwrap_or(&String::new()),
+        "total_current_value": snapshot.map(|s| s.total_current_value).unwrap_or(0),
+        "total_open_cost_basis": snapshot.map(|s| s.total_open_cost_basis).unwrap_or(0),
+        "total_realized_pnl": snapshot.map(|s| s.total_realized_pnl).unwrap_or(0),
+        "total_unrealized_pnl": snapshot.map(|s| s.total_unrealized_pnl).unwrap_or(0),
+        "total_return_pct": snapshot.map(|s| s.total_return_pct).unwrap_or(0.0),
+        "currency": snapshot.map(|s| s.currency.clone()).unwrap_or_default(),
     })))
 }
 
