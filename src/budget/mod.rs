@@ -412,7 +412,10 @@ async fn force_close_budget(
 ) -> ApiResult<Json<serde_json::Value>> {
     let mut c = client(&state).await?;
     let resp = c
-        .force_close_budget(with_user(&headers, pb::ForceCloseBudgetRequest { budget_id })?)
+        .force_close_budget(with_user(
+            &headers,
+            pb::ForceCloseBudgetRequest { budget_id },
+        )?)
         .await
         .map_err(map_status)?
         .into_inner();

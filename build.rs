@@ -11,11 +11,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         "."
     };
-    let libs_prefix = if proto_root == ".." {
-        ".."
-    } else {
-        "libs"
-    };
+    let libs_prefix = if proto_root == ".." { ".." } else { "libs" };
 
     let mut includes = vec![proto_root.to_string()];
     for candidate in [
@@ -45,7 +41,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         format!("{}/protobuf/sharing/sharing.proto", proto_root),
         format!("{}/protobuf/portfolio/portfolio.proto", proto_root),
         format!("{}/protobuf/shared/user/user.proto", proto_root),
-        format!("{}/protobuf/shared/organization/organization.proto", proto_root),
+        format!(
+            "{}/protobuf/shared/organization/organization.proto",
+            proto_root
+        ),
         format!("{}/protobuf/shared/media/media.proto", proto_root),
         format!("{}/libs/protobuf/common/base.proto", libs_prefix),
     ];
