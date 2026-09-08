@@ -196,6 +196,18 @@ impl BudgetService for CapturingBudgetSvc {
     ) -> Result<Response<gateway::pb::service::budget::ListPriceSnapshotsResponse>, Status> {
         unimplemented!()
     }
+    async fn force_close_budget(
+        &self,
+        _: Request<gateway::pb::service::budget::ForceCloseBudgetRequest>,
+    ) -> Result<Response<gateway::pb::service::budget::ForceCloseBudgetResponse>, Status> {
+        unimplemented!()
+    }
+    async fn refresh_portfolio(
+        &self,
+        _: Request<gateway::pb::service::budget::RefreshPortfolioRequest>,
+    ) -> Result<Response<gateway::pb::service::budget::RefreshPortfolioResponse>, Status> {
+        unimplemented!()
+    }
 }
 
 fn make_jwt(user_type: &str) -> String {
