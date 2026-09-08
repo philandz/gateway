@@ -1,12 +1,17 @@
 use std::path::Path;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let (proto_root, proto_prefix, libs_prefix) =
-        if Path::new("../protobuf/identity/identity.proto").exists() {
-            ("..", "../protobuf", "../libs")
-        } else {
-            (".", "protobuf", "libs")
-        };
+    // Determine where we are being built from.
+    //
+    // All protos live at the repo-root `protobuf/` level.  When building
+    // from the gateway directory (which has its own Cargo.toml), we need to
+    // use ".." as proto_root to reach the repo-level protos.
+    let proto_root = if Path::new("../protobuf/budget/budget.proto").exists() {
+        ".."
+    } else {
+        "."
+    };
+    let libs_prefix = if proto_root == ".." { ".." } else { "libs" };
 
     let mut includes = vec![proto_root.to_string()];
     for candidate in [
@@ -27,18 +32,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let include_refs: Vec<&str> = includes.iter().map(String::as_str).collect();
 
-    let files = [
-        format!("{proto_prefix}/identity/identity.proto"),
-        format!("{proto_prefix}/media/media.proto"),
-        format!("{proto_prefix}/budget/budget.proto"),
-        format!("{proto_prefix}/category/category.proto"),
-        format!("{proto_prefix}/entry/entry.proto"),
-        format!("{proto_prefix}/sharing/sharing.proto"),
-        format!("{proto_prefix}/portfolio/portfolio.proto"),
-        format!("{proto_prefix}/shared/user/user.proto"),
-        format!("{proto_prefix}/shared/organization/organization.proto"),
-        format!("{proto_prefix}/shared/media/media.proto"),
-        format!("{libs_prefix}/protobuf/common/base.proto"),
+    let files = vec![
+        format!("{}/protobuf/identity/identity.proto", proto_root),
+        format!("{}/protobuf/media/media.proto", proto_root),
+        format!("{}/protobuf/budget/budget.proto", proto_root),
+        format!("{}/protobuf/category/category.proto", proto_root),
+        format!("{}/protobuf/entry/entry.proto", proto_root),
+        format!("{}/protobuf/sharing/sharing.proto", proto_root),
+        format!("{}/protobuf/portfolio/portfolio.proto", proto_root),
+        format!("{}/protobuf/shared/user/user.proto", proto_root),
+        format!(
+            "{}/protobuf/shared/organization/organization.proto",
+            proto_root
+        ),
+        format!("{}/protobuf/shared/media/media.proto", proto_root),
+        format!("{}/libs/protobuf/common/base.proto", libs_prefix),
     ];
     let file_refs: Vec<&str> = files.iter().map(String::as_str).collect();
 
