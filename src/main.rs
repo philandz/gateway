@@ -71,7 +71,12 @@ async fn main() -> anyhow::Result<()> {
         IdentityTransport::GrpcTranscode => Router::new()
             .nest("/identity", gateway::identity::router())
             .nest("/media", gateway::media::router())
-            .nest("/budget", gateway::budget::router())
+            // Portfolio routes are also served under /budget: the web client addresses
+            // /api/budget/budgets/{id}/portfolio/... (kept alongside /portfolios).
+            .nest(
+                "/budget",
+                gateway::budget::router().merge(gateway::portfolio::router()),
+            )
             .nest("/category", gateway::category::router())
             .nest("/insight", gateway::insight::router())
             .nest("/entry", gateway::entry::router())
