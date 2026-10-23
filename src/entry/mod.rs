@@ -30,6 +30,11 @@ pub fn router() -> Router<Arc<AppState>> {
         )
         .route("/budgets/{budget_id}/entries/split", post(create_split))
         .route("/budgets/{budget_id}/summary", get(get_entry_summary))
+        .route("/transfers", post(create_transfer))
+        .route(
+            "/transfers/{group_id}",
+            patch(update_transfer).delete(delete_transfer),
+        )
         .route("/entries", get(list_all_entries).post(create_entry))
         .route(
             "/entries/{entry_id}",
@@ -914,6 +919,9 @@ fn map_entry(e: &pb::Entry) -> serde_json::Value {
         "next_occurrence": e.next_occurrence,
         "split_group_id": e.split_group_id,
         "split_total": e.split_total,
+        "transfer_group_id": e.transfer_group_id,
+        "counterparty_budget_id": e.counterparty_budget_id,
+        "counterparty_kind": e.counterparty_kind,
     })
 }
 
@@ -957,4 +965,122 @@ fn map_attachment(a: &pb::Attachment) -> serde_json::Value {
 #[cfg(test)]
 mod tests {
     mod list_entries_query;
+}
+
+// ---------------------------------------------------------------------------
+// Transfers (plan R1)
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+struct CreateTransferBody {
+    source_budget_id: String,
+    destination_budget_id: String,
+    amount: i64,
+    entry_date: String,
+    description: Option<String>,
+    notes: Option<String>,
+    idempotency_key: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct UpdateTransferBody {
+    amount: Option<i64>,
+    entry_date: Option<String>,
+    description: Option<String>,
+    notes: Option<String>,
+}
+
+fn map_transfer(t: &pb::Transfer) -> serde_json::Value {
+    serde_json::json!({
+        "group_id": t.group_id,
+        "out_entry": t.out_entry.as_ref().map(map_entry),
+        "in_entry": t.in_entry.as_ref().map(map_entry),
+    })
+}
+
+async fn create_transfer(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<CreateTransferBody>,
+) -> ApiResult<(StatusCode, Json<serde_json::Value>)> {
+    let mut c = client(&state).await?;
+    let resp = c
+        .create_transfer(with_user(
+            &headers,
+            pb::CreateTransferRequest {
+                source_budget_id: body.source_budget_id,
+                destination_budget_id: body.destination_budget_id,
+                amount: body.amount,
+                entry_date: body.entry_date,
+                description: body.description.unwrap_or_default(),
+                notes: body.notes,
+                idempotency_key: body.idempotency_key.unwrap_or_default(),
+            },
+        )?)
+        .await
+        .map_err(map_status)?
+        .into_inner();
+    Ok((StatusCode::CREATED, Json(map_transfer(&resp))))
+}
+
+async fn update_transfer(
+    State(state): State<Arc<AppState>>,
+    Path(group_id): Path<String>,
+    headers: HeaderMap,
+    Json(body): Json<UpdateTransferBody>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let mut c = client(&state).await?;
+    let resp = c
+        .update_transfer(with_user(
+            &headers,
+            pb::UpdateTransferRequest {
+                group_id,
+                amount: body.amount,
+                entry_date: body.entry_date,
+                description: body.description,
+                notes: body.notes,
+            },
+        )?)
+        .await
+        .map_err(map_status)?
+        .into_inner();
+    Ok(Json(map_transfer(&resp)))
+}
+
+async fn delete_transfer(
+    State(state): State<Arc<AppState>>,
+    Path(group_id): Path<String>,
+    headers: HeaderMap,
+) -> ApiResult<Json<serde_json::Value>> {
+    let mut c = client(&state).await?;
+    c.delete_transfer(with_user(&headers, pb::DeleteTransferRequest { group_id })?)
+        .await
+        .map_err(map_status)?;
+    Ok(Json(serde_json::json!({"message": "Transfer deleted"})))
+}
+
+#[cfg(test)]
+mod transfer_tests {
+    use super::*;
+
+    #[test]
+    fn map_transfer_exposes_both_legs_and_link_fields() {
+        let leg = |kind: i32| pb::Entry {
+            kind,
+            amount: 500,
+            transfer_group_id: Some("g".into()),
+            counterparty_kind: Some("entry".into()),
+            ..Default::default()
+        };
+        let t = pb::Transfer {
+            group_id: "g".into(),
+            out_entry: Some(leg(pb::EntryKind::TransferOut as i32)),
+            in_entry: Some(leg(pb::EntryKind::TransferIn as i32)),
+        };
+        let v = map_transfer(&t);
+        assert_eq!(v["group_id"], "g");
+        assert_eq!(v["out_entry"]["transfer_group_id"], "g");
+        assert_eq!(v["in_entry"]["counterparty_kind"], "entry");
+        assert_eq!(v["out_entry"]["amount"], 500);
+    }
 }
