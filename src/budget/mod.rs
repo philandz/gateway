@@ -1062,6 +1062,7 @@ fn map_budget(budget: Option<&pb::Budget>) -> serde_json::Value {
             "member_count":   b.member_count,
             "period_start_day": b.period_start_day,
             "timezone":       b.timezone,
+            "status":         b.status,
         })
     })
 }

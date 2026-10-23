@@ -202,6 +202,18 @@ impl BudgetService for CapturingBudgetSvc {
     ) -> Result<Response<gateway::pb::service::budget::ForceCloseBudgetResponse>, Status> {
         unimplemented!()
     }
+    async fn set_budget_status(
+        &self,
+        _: Request<gateway::pb::service::budget::SetBudgetStatusRequest>,
+    ) -> Result<Response<gateway::pb::service::budget::SetBudgetStatusResponse>, Status> {
+        unimplemented!()
+    }
+    async fn get_budget_status(
+        &self,
+        _: Request<gateway::pb::service::budget::GetBudgetStatusRequest>,
+    ) -> Result<Response<gateway::pb::service::budget::GetBudgetStatusResponse>, Status> {
+        unimplemented!()
+    }
     async fn refresh_portfolio(
         &self,
         _: Request<gateway::pb::service::budget::RefreshPortfolioRequest>,

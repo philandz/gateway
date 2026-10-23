@@ -29,6 +29,8 @@ pub fn router() -> Router<Arc<AppState>> {
                 .delete(delete_expense),
         )
         .route("/budgets/{budget_id}/settlement", get(calculate_settlement))
+        .route("/budgets/{budget_id}/archive", post(archive_budget))
+        .route("/budgets/{budget_id}/reopen", post(reopen_budget))
         .route("/budgets/{budget_id}/join-link", post(generate_join_link))
         .route("/join-link/accept", post(accept_join_link))
         // --- Guest join ---
@@ -525,6 +527,40 @@ async fn calculate_settlement(
     Ok(Json(
         serde_json::json!({ "budget_id": resp.budget_id, "transfers": transfers }),
     ))
+}
+
+async fn archive_budget(
+    State(state): State<Arc<AppState>>,
+    Path(budget_id): Path<String>,
+    headers: HeaderMap,
+) -> ApiResult<Json<serde_json::Value>> {
+    let mut c = client(&state).await?;
+    let resp = c
+        .archive_sharing_budget(with_user(
+            &headers,
+            pb::SetSharingStatusRequest { budget_id },
+        )?)
+        .await
+        .map_err(map_status)?
+        .into_inner();
+    Ok(Json(serde_json::json!({ "status": resp.status })))
+}
+
+async fn reopen_budget(
+    State(state): State<Arc<AppState>>,
+    Path(budget_id): Path<String>,
+    headers: HeaderMap,
+) -> ApiResult<Json<serde_json::Value>> {
+    let mut c = client(&state).await?;
+    let resp = c
+        .reopen_sharing_budget(with_user(
+            &headers,
+            pb::SetSharingStatusRequest { budget_id },
+        )?)
+        .await
+        .map_err(map_status)?
+        .into_inner();
+    Ok(Json(serde_json::json!({ "status": resp.status })))
 }
 
 async fn generate_join_link(
