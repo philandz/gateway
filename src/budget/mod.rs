@@ -256,6 +256,8 @@ struct CreateBudgetRequest {
     budget_type: Option<serde_json::Value>, // accepts "standard" or 1
     currency: Option<String>,
     template_id: Option<String>,
+    period_start_day: Option<i32>,
+    timezone: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -263,6 +265,8 @@ struct UpdateBudgetRequest {
     name: Option<String>,
     budget_type: Option<serde_json::Value>, // accepts "standard" or 1
     is_private: Option<bool>,
+    period_start_day: Option<i32>,
+    timezone: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -320,6 +324,8 @@ async fn create_budget(
                 budget_type: parse_budget_type(body.budget_type.as_ref()),
                 currency: body.currency.unwrap_or_else(|| "VND".to_string()),
                 template_id: body.template_id.unwrap_or_default(),
+                period_start_day: body.period_start_day,
+                timezone: body.timezone,
             },
         )?)
         .await
@@ -389,6 +395,8 @@ async fn update_budget(
                 // Keep the stored flag unless the caller sends one; renaming a
                 // budget must not silently make it public again.
                 is_private,
+                period_start_day: body.period_start_day,
+                timezone: body.timezone,
             },
         )?)
         .await
@@ -1048,6 +1056,8 @@ fn map_budget(budget: Option<&pb::Budget>) -> serde_json::Value {
             "current_spend":  b.current_spend,
             "burn_rate_pct":  b.burn_rate_pct,
             "member_count":   b.member_count,
+            "period_start_day": b.period_start_day,
+            "timezone":       b.timezone,
         })
     })
 }

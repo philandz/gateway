@@ -1,7 +1,7 @@
 use std::{sync::Arc, time::Duration};
 
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
     routing::{get, patch},
     Json, Router,
@@ -30,6 +30,7 @@ pub fn router() -> Router<Arc<AppState>> {
                 .delete(delete_category),
         )
         .route("/categories/{category_id}/archive", patch(archive_category))
+        .route("/budgets/{budget_id}/plan", get(get_plan).put(set_plan))
 }
 
 async fn health(State(state): State<Arc<AppState>>) -> ApiResult<&'static str> {
@@ -365,4 +366,156 @@ fn map_cat(c: &pb::Category) -> serde_json::Value {
         "tx_count":       c.tx_count,
         "archived":       c.archived,
     })
+}
+
+// ---------------------------------------------------------------------------
+// Period plan
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize, Default)]
+struct PlanQuery {
+    #[serde(default)]
+    period_offset: Option<i32>,
+}
+
+#[derive(Deserialize)]
+struct PlanItemBody {
+    category_id: String,
+    planned_amount: i64,
+    /// "this_period" | "default"
+    scope: String,
+}
+
+#[derive(Deserialize)]
+struct SetPlanBody {
+    #[serde(default)]
+    period_offset: Option<i32>,
+    #[serde(default)]
+    items: Vec<PlanItemBody>,
+    #[serde(default)]
+    unallocated_planned: Option<i64>,
+}
+
+fn parse_scope(s: &str) -> Result<pb::PlanScope, (StatusCode, Json<ErrorResponse>)> {
+    match s.to_ascii_lowercase().as_str() {
+        "this_period" => Ok(pb::PlanScope::ThisPeriod),
+        "default" => Ok(pb::PlanScope::Default),
+        _ => Err(map_status(Status::invalid_argument(
+            "scope must be this_period or default",
+        ))),
+    }
+}
+
+fn map_plan(p: &pb::BudgetPlan) -> serde_json::Value {
+    let cats: Vec<serde_json::Value> = p
+        .categories
+        .iter()
+        .map(|c| {
+            serde_json::json!({
+                "category_id":     c.category_id,
+                "name":            c.name,
+                "kind":            c.kind,
+                "icon":            c.icon,
+                "color":           c.color,
+                "default_planned": c.default_planned,
+                "period_override": c.period_override,
+                "planned":         c.planned,
+                "archived":        c.archived,
+            })
+        })
+        .collect();
+    serde_json::json!({
+        "budget_id":           p.budget_id,
+        "period_from":         p.period_from,
+        "period_to":           p.period_to,
+        "categories":          cats,
+        "unallocated_planned": p.unallocated_planned,
+        "total_planned":       p.total_planned,
+    })
+}
+
+async fn get_plan(
+    State(state): State<Arc<AppState>>,
+    Path(budget_id): Path<String>,
+    Query(q): Query<PlanQuery>,
+    headers: HeaderMap,
+) -> ApiResult<Json<serde_json::Value>> {
+    let mut c = client(&state).await?;
+    let resp = c
+        .get_plan(with_user(
+            &headers,
+            pb::GetPlanRequest {
+                budget_id,
+                period_offset: q.period_offset.unwrap_or(0),
+            },
+        )?)
+        .await
+        .map_err(map_status)?
+        .into_inner();
+    Ok(Json(map_plan(&resp)))
+}
+
+async fn set_plan(
+    State(state): State<Arc<AppState>>,
+    Path(budget_id): Path<String>,
+    headers: HeaderMap,
+    Json(body): Json<SetPlanBody>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let items = body
+        .items
+        .iter()
+        .map(|i| {
+            Ok(pb::PlanItem {
+                category_id: i.category_id.clone(),
+                planned_amount: i.planned_amount,
+                scope: parse_scope(&i.scope)? as i32,
+            })
+        })
+        .collect::<Result<Vec<_>, (StatusCode, Json<ErrorResponse>)>>()?;
+    let mut c = client(&state).await?;
+    let resp = c
+        .set_period_plan(with_user(
+            &headers,
+            pb::SetPeriodPlanRequest {
+                budget_id,
+                period_offset: body.period_offset.unwrap_or(0),
+                items,
+                unallocated_planned: body.unallocated_planned,
+            },
+        )?)
+        .await
+        .map_err(map_status)?
+        .into_inner();
+    Ok(Json(map_plan(&resp)))
+}
+
+#[cfg(test)]
+mod plan_tests {
+    use super::*;
+
+    #[test]
+    fn scope_names_map_to_enum() {
+        assert_eq!(
+            parse_scope("this_period").ok(),
+            Some(pb::PlanScope::ThisPeriod)
+        );
+        assert_eq!(parse_scope("DEFAULT").ok(), Some(pb::PlanScope::Default));
+        assert!(parse_scope("forever").is_err());
+    }
+
+    #[test]
+    fn plan_json_exposes_override_as_null_when_absent() {
+        let plan = pb::BudgetPlan {
+            budget_id: "b".into(),
+            categories: vec![pb::CategoryPlan {
+                category_id: "c".into(),
+                planned: 5,
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let v = map_plan(&plan);
+        assert!(v["categories"][0]["period_override"].is_null());
+        assert_eq!(v["categories"][0]["planned"], 5);
+    }
 }
