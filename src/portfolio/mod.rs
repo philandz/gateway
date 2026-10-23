@@ -85,6 +85,35 @@ pub fn router() -> Router<Arc<AppState>> {
             "/budgets/{budget_id}/portfolio/assets/{asset_id}/stock-disposal",
             post(record_stock_disposal),
         )
+        .route(
+            "/budgets/{budget_id}/portfolio/assets/{asset_id}/gold-disposal",
+            post(record_gold_disposal),
+        )
+        .route(
+            "/budgets/{budget_id}/portfolio/assets/{asset_id}/maturity",
+            post(record_deposit_maturity),
+        )
+        .route(
+            "/budgets/{budget_id}/portfolio/assets/{asset_id}/rollover",
+            post(record_deposit_rollover),
+        )
+        .route("/budgets/{budget_id}/portfolio/fund", get(get_fund_summary))
+        .route(
+            "/budgets/{budget_id}/portfolio/fund/movements",
+            get(list_fund_movements),
+        )
+        .route(
+            "/budgets/{budget_id}/portfolio/fund/deposit",
+            post(deposit_to_fund),
+        )
+        .route(
+            "/budgets/{budget_id}/portfolio/fund/withdraw",
+            post(withdraw_from_fund),
+        )
+        .route(
+            "/budgets/{budget_id}/portfolio/fund/adjust",
+            post(adjust_fund_cash),
+        )
 }
 
 #[derive(Debug, Deserialize)]
@@ -416,6 +445,117 @@ async fn record_stock_disposal(
     )?;
     let resp = client
         .record_stock_disposal(req)
+        .await
+        .map_err(into_api_err)?;
+    Ok(Json(resp.into_inner()))
+}
+
+async fn record_gold_disposal(
+    State(state): State<Arc<AppState>>,
+    Path((budget_id, asset_id)): Path<(String, String)>,
+    headers: HeaderMap,
+    Json(mut body): Json<pb::RecordGoldDisposalRequest>,
+) -> ApiResult<Json<pb::PortfolioAsset>> {
+    let mut client = connect(&state).await?;
+    body.budget_id = budget_id;
+    let req = make_req(&headers, pb::RecordGoldDisposalRequest { asset_id, ..body })?;
+    let resp = client.record_gold_disposal(req).await.map_err(into_api_err)?;
+    Ok(Json(resp.into_inner()))
+}
+
+async fn record_deposit_maturity(
+    State(state): State<Arc<AppState>>,
+    Path((budget_id, asset_id)): Path<(String, String)>,
+    headers: HeaderMap,
+    Json(mut body): Json<pb::RecordFixedDepositMaturityRequest>,
+) -> ApiResult<Json<pb::PortfolioAsset>> {
+    let mut client = connect(&state).await?;
+    body.budget_id = budget_id;
+    let req = make_req(&headers, pb::RecordFixedDepositMaturityRequest { asset_id, ..body })?;
+    let resp = client.record_fixed_deposit_maturity(req).await.map_err(into_api_err)?;
+    Ok(Json(resp.into_inner()))
+}
+
+async fn record_deposit_rollover(
+    State(state): State<Arc<AppState>>,
+    Path((budget_id, asset_id)): Path<(String, String)>,
+    headers: HeaderMap,
+    Json(mut body): Json<pb::RecordFixedDepositRolloverRequest>,
+) -> ApiResult<Json<pb::PortfolioAsset>> {
+    let mut client = connect(&state).await?;
+    body.budget_id = budget_id;
+    let req = make_req(&headers, pb::RecordFixedDepositRolloverRequest { asset_id, ..body })?;
+    let resp = client.record_fixed_deposit_rollover(req).await.map_err(into_api_err)?;
+    Ok(Json(resp.into_inner()))
+}
+
+async fn deposit_to_fund(
+    State(state): State<Arc<AppState>>,
+    Path(budget_id): Path<String>,
+    headers: HeaderMap,
+    Json(mut body): Json<pb::FundTransferRequest>,
+) -> ApiResult<Json<pb::FundTransferResponse>> {
+    let mut client = connect(&state).await?;
+    body.budget_id = budget_id;
+    let req = make_req(&headers, body)?;
+    let resp = client.deposit_to_fund(req).await.map_err(into_api_err)?;
+    Ok(Json(resp.into_inner()))
+}
+
+async fn withdraw_from_fund(
+    State(state): State<Arc<AppState>>,
+    Path(budget_id): Path<String>,
+    headers: HeaderMap,
+    Json(mut body): Json<pb::FundTransferRequest>,
+) -> ApiResult<Json<pb::FundTransferResponse>> {
+    let mut client = connect(&state).await?;
+    body.budget_id = budget_id;
+    let req = make_req(&headers, body)?;
+    let resp = client.withdraw_from_fund(req).await.map_err(into_api_err)?;
+    Ok(Json(resp.into_inner()))
+}
+
+async fn adjust_fund_cash(
+    State(state): State<Arc<AppState>>,
+    Path(budget_id): Path<String>,
+    headers: HeaderMap,
+    Json(mut body): Json<pb::AdjustFundCashRequest>,
+) -> ApiResult<Json<pb::FundCashMovement>> {
+    let mut client = connect(&state).await?;
+    body.budget_id = budget_id;
+    let req = make_req(&headers, body)?;
+    let resp = client.adjust_fund_cash(req).await.map_err(into_api_err)?;
+    Ok(Json(resp.into_inner()))
+}
+
+async fn get_fund_summary(
+    State(state): State<Arc<AppState>>,
+    Path(budget_id): Path<String>,
+    headers: HeaderMap,
+) -> ApiResult<Json<pb::FundSummary>> {
+    let mut client = connect(&state).await?;
+    let req = make_req(&headers, pb::GetFundSummaryRequest { budget_id })?;
+    let resp = client.get_fund_summary(req).await.map_err(into_api_err)?;
+    Ok(Json(resp.into_inner()))
+}
+
+async fn list_fund_movements(
+    State(state): State<Arc<AppState>>,
+    Path(budget_id): Path<String>,
+    Query(p): Query<PageQuery>,
+    headers: HeaderMap,
+) -> ApiResult<Json<pb::ListFundCashMovementsResponse>> {
+    let mut client = connect(&state).await?;
+    let req = make_req(
+        &headers,
+        pb::ListFundCashMovementsRequest {
+            budget_id,
+            page: p.page.unwrap_or(1),
+            page_size: p.page_size.unwrap_or(20),
+        },
+    )?;
+    let resp = client
+        .list_fund_cash_movements(req)
         .await
         .map_err(into_api_err)?;
     Ok(Json(resp.into_inner()))
