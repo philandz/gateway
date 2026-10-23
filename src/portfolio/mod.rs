@@ -498,7 +498,7 @@ async fn deposit_to_fund(
     let mut client = connect(&state).await?;
     body.budget_id = budget_id;
     let req = make_req(&headers, body)?;
-    let resp = client.deposit_to_fund(req).await.map_err(into_api_err)?;
+    let resp = client.deposit_to_fund(req).await.map_err(fund_api_err)?;
     Ok(Json(resp.into_inner()))
 }
 
@@ -511,7 +511,7 @@ async fn withdraw_from_fund(
     let mut client = connect(&state).await?;
     body.budget_id = budget_id;
     let req = make_req(&headers, body)?;
-    let resp = client.withdraw_from_fund(req).await.map_err(into_api_err)?;
+    let resp = client.withdraw_from_fund(req).await.map_err(fund_api_err)?;
     Ok(Json(resp.into_inner()))
 }
 
@@ -524,7 +524,7 @@ async fn adjust_fund_cash(
     let mut client = connect(&state).await?;
     body.budget_id = budget_id;
     let req = make_req(&headers, body)?;
-    let resp = client.adjust_fund_cash(req).await.map_err(into_api_err)?;
+    let resp = client.adjust_fund_cash(req).await.map_err(fund_api_err)?;
     Ok(Json(resp.into_inner()))
 }
 
@@ -653,6 +653,13 @@ fn decode_user_type(bearer: &str) -> Option<String> {
 
 fn base64_url_decode(s: &str) -> Option<Vec<u8>> {
     URL_SAFE_NO_PAD.decode(s).ok()
+}
+
+/// Fund writes surface business errors (insufficient cash, bad input) with
+/// their real HTTP class instead of the legacy blanket 500.
+fn fund_api_err(e: tonic::Status) -> (StatusCode, Json<ErrorResponse>) {
+    let (http, env) = philand_error::http_error_from_tonic_status(&e);
+    (http, Json(env))
 }
 
 fn into_api_err(e: tonic::Status) -> (StatusCode, Json<ErrorResponse>) {
