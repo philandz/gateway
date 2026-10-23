@@ -259,6 +259,7 @@ async fn super_admin_jwt_passes_through_gateway_with_user_type_metadata() {
         budget_grpc_url: format!("http://127.0.0.1:{port}"),
         portfolio_grpc_url: format!("http://127.0.0.1:{port}"),
         category_grpc_url: "http://127.0.0.1:1".to_string(),
+        insight_grpc_url: "http://127.0.0.1:1".to_string(),
         entry_grpc_url: "http://127.0.0.1:1".to_string(),
         sharing_grpc_url: "http://127.0.0.1:1".to_string(),
         identity_transport: gateway::IdentityTransport::GrpcTranscode,

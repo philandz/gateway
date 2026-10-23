@@ -20,6 +20,9 @@ pub mod pb {
         pub mod category {
             tonic::include_proto!("service.category");
         }
+        pub mod insight {
+            tonic::include_proto!("service.insight");
+        }
         pub mod entry {
             tonic::include_proto!("service.entry");
         }
@@ -45,6 +48,7 @@ pub mod pb {
 
 pub mod budget;
 pub mod category;
+pub mod insight;
 pub mod entry;
 pub mod identity;
 pub mod media;
@@ -95,6 +99,8 @@ pub struct AppState {
     pub portfolio_grpc_url: String,
     /// Category service gRPC endpoint.
     pub category_grpc_url: String,
+    /// Insight service gRPC endpoint.
+    pub insight_grpc_url: String,
     /// Entry service gRPC endpoint.
     pub entry_grpc_url: String,
     /// Sharing service gRPC endpoint.
