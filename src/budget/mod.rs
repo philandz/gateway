@@ -258,6 +258,8 @@ struct CreateBudgetRequest {
     template_id: Option<String>,
     period_start_day: Option<i32>,
     timezone: Option<String>,
+    locale: Option<String>,
+    expected_income: Option<i64>,
 }
 
 #[derive(Deserialize)]
@@ -326,6 +328,8 @@ async fn create_budget(
                 template_id: body.template_id.unwrap_or_default(),
                 period_start_day: body.period_start_day,
                 timezone: body.timezone,
+                locale: body.locale.unwrap_or_default(),
+                expected_income: body.expected_income.unwrap_or(0),
             },
         )?)
         .await
