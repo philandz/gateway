@@ -262,6 +262,7 @@ struct CreateBudgetRequest {
 struct UpdateBudgetRequest {
     name: Option<String>,
     budget_type: Option<serde_json::Value>, // accepts "standard" or 1
+    is_private: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -375,6 +376,9 @@ async fn update_budget(
     } else {
         current_budget.map(|b| b.budget_type).unwrap_or(1)
     };
+    let is_private = body
+        .is_private
+        .unwrap_or_else(|| current_budget.map(|b| b.is_private).unwrap_or(false));
     let resp = c
         .update_budget(with_user(
             &headers,
@@ -382,7 +386,9 @@ async fn update_budget(
                 budget_id,
                 name,
                 budget_type,
-                is_private: false, // TODO: wire is_private from request body (T1.1)
+                // Keep the stored flag unless the caller sends one; renaming a
+                // budget must not silently make it public again.
+                is_private,
             },
         )?)
         .await
