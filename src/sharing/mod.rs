@@ -24,7 +24,9 @@ pub fn router() -> Router<Arc<AppState>> {
         )
         .route(
             "/expenses/{expense_id}",
-            get(get_expense).delete(delete_expense),
+            get(get_expense)
+                .patch(update_expense)
+                .delete(delete_expense),
         )
         .route("/budgets/{budget_id}/settlement", get(calculate_settlement))
         .route("/budgets/{budget_id}/join-link", post(generate_join_link))
@@ -288,7 +290,6 @@ struct LegBody {
     user_id: String,
     amount: i64,
     #[serde(default)]
-    #[allow(dead_code)]
     weight: i64,
 }
 
@@ -353,36 +354,7 @@ async fn add_expense(
     Json(body): Json<AddExpenseRequest>,
 ) -> ApiResult<(StatusCode, Json<serde_json::Value>)> {
     let mut c = client(&state).await?;
-    let legs = body
-        .legs
-        .unwrap_or_default()
-        .into_iter()
-        .map(|l| pb::ExpenseLeg {
-            user_id: l.user_id,
-            amount: l.amount,
-            weight: 0,
-            share: 0,
-        })
-        .collect();
-    let items: Vec<pb::ExpenseItem> = body
-        .items
-        .into_iter()
-        .map(|it| pb::ExpenseItem {
-            id: String::new(),
-            expense_id: String::new(),
-            label: it.label,
-            amount: it.amount,
-            assignments: it
-                .assignments
-                .into_iter()
-                .map(|a| pb::ItemAssignment {
-                    user_id: a.user_id,
-                    numerator: a.numerator,
-                    resolved_amount: 0,
-                })
-                .collect(),
-        })
-        .collect();
+    let (legs, items) = build_legs_items(body.legs, body.items);
 
     let resp = c
         .add_expense(with_user_or_guest(
@@ -404,6 +376,71 @@ async fn add_expense(
         .map_err(map_status)?
         .into_inner();
     Ok((StatusCode::CREATED, Json(map_expense(&resp))))
+}
+
+fn build_legs_items(
+    legs: Option<Vec<LegBody>>,
+    items: Vec<ItemBody>,
+) -> (Vec<pb::ExpenseLeg>, Vec<pb::ExpenseItem>) {
+    let legs = legs
+        .unwrap_or_default()
+        .into_iter()
+        .map(|l| pb::ExpenseLeg {
+            user_id: l.user_id,
+            amount: l.amount,
+            weight: l.weight,
+            share: 0,
+        })
+        .collect();
+    let items = items
+        .into_iter()
+        .map(|it| pb::ExpenseItem {
+            id: String::new(),
+            expense_id: String::new(),
+            label: it.label,
+            amount: it.amount,
+            assignments: it
+                .assignments
+                .into_iter()
+                .map(|a| pb::ItemAssignment {
+                    user_id: a.user_id,
+                    numerator: a.numerator,
+                    resolved_amount: 0,
+                })
+                .collect(),
+        })
+        .collect();
+    (legs, items)
+}
+
+async fn update_expense(
+    State(state): State<Arc<AppState>>,
+    Path(expense_id): Path<String>,
+    headers: HeaderMap,
+    Json(body): Json<AddExpenseRequest>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let mut c = client(&state).await?;
+    let (legs, items) = build_legs_items(body.legs, body.items);
+    let resp = c
+        .update_expense(with_user_or_guest(
+            &headers,
+            pb::UpdateExpenseRequest {
+                expense_id,
+                paid_by: body.paid_by,
+                total_amount: body.total_amount,
+                description: body.description.unwrap_or_default(),
+                expense_date: body.expense_date,
+                category_id: body.category_id.unwrap_or_default(),
+                split_method: body.split_method.unwrap_or(1),
+                legs,
+                items,
+                receipt_media_id: body.receipt_media_id.unwrap_or_default(),
+            },
+        )?)
+        .await
+        .map_err(map_status)?
+        .into_inner();
+    Ok(Json(map_expense(&resp)))
 }
 
 async fn get_expense(
