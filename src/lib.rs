@@ -46,11 +46,12 @@ pub mod pb {
     }
 }
 
+pub mod auth;
 pub mod budget;
 pub mod category;
-pub mod insight;
 pub mod entry;
 pub mod identity;
+pub mod insight;
 pub mod media;
 pub mod middleware;
 pub mod portfolio;
@@ -106,4 +107,8 @@ pub struct AppState {
     /// Sharing service gRPC endpoint.
     pub sharing_grpc_url: String,
     pub identity_transport: IdentityTransport,
+    /// HS256 secret shared with the identity service. The gateway verifies
+    /// every bearer token with it before forwarding the `sub` claim as
+    /// `x-user-id` — the downstream services trust that metadata.
+    pub jwt_secret: String,
 }

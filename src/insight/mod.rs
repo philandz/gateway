@@ -9,7 +9,7 @@ use axum::{
     Json, Router,
 };
 use serde::Deserialize;
-use tonic::{metadata::MetadataValue, transport::Channel, Request as GrpcRequest, Status};
+use tonic::{transport::Channel, Request as GrpcRequest, Status};
 
 use crate::pb::service::insight as pb;
 use crate::pb::service::insight::insight_service_client::InsightServiceClient;
@@ -42,33 +42,11 @@ async fn client(state: &AppState) -> ApiResult<InsightServiceClient<Channel>> {
         .map_err(|e| map_status(Status::unavailable(e.to_string())))
 }
 
-fn with_user<T>(headers: &HeaderMap, req: T) -> ApiResult<GrpcRequest<T>> {
-    let auth = headers
-        .get("authorization")
-        .and_then(|v| v.to_str().ok())
-        .ok_or_else(|| map_status(Status::unauthenticated("Missing Authorization header")))?;
-    let mut grpc_req = GrpcRequest::new(req);
-    let value = MetadataValue::try_from(auth)
-        .map_err(|_| map_status(Status::unauthenticated("Invalid Authorization header")))?;
-    grpc_req.metadata_mut().insert("authorization", value);
-    let sub = auth
-        .strip_prefix("Bearer ")
-        .and_then(sub_from_jwt)
-        .ok_or_else(|| map_status(Status::unauthenticated("Invalid token")))?;
-    let v = MetadataValue::try_from(sub.as_str())
-        .map_err(|_| map_status(Status::unauthenticated("Invalid token subject")))?;
-    grpc_req.metadata_mut().insert("x-user-id", v);
-    Ok(grpc_req)
-}
-
-/// The gateway has already authenticated the bearer; this only reads the `sub` claim.
-fn sub_from_jwt(token: &str) -> Option<String> {
-    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-    use base64::Engine as _;
-    let payload = token.split('.').nth(1)?;
-    let bytes = URL_SAFE_NO_PAD.decode(payload).ok()?;
-    let v: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
-    v.get("sub")?.as_str().map(str::to_string)
+fn with_user<T>(state: &AppState, headers: &HeaderMap, req: T) -> ApiResult<GrpcRequest<T>> {
+    // SECURITY: verify the bearer token before forwarding the `sub` claim —
+    // the insight service trusts `x-user-id` at face value.
+    crate::auth::request_with_user(&state.jwt_secret, headers, req)
+        .map_err(|e| map_status(Status::unauthenticated(e.message())))
 }
 
 fn status_name(s: i32) -> &'static str {
@@ -133,6 +111,7 @@ async fn get_period_summary(
     let mut c = client(&state).await?;
     let resp = c
         .get_period_summary(with_user(
+            &state,
             &headers,
             pb::PeriodSummaryRequest {
                 budget_id,
@@ -157,12 +136,11 @@ mod tests {
     }
 
     #[test]
-    fn sub_is_read_from_jwt_payload() {
-        // header.payload.sig with payload {"sub":"u1"}
-        assert_eq!(
-            sub_from_jwt("e30.eyJzdWIiOiJ1MSJ9.x").as_deref(),
-            Some("u1")
-        );
-        assert_eq!(sub_from_jwt("garbage"), None);
+    fn forged_jwt_is_rejected() {
+        // header.payload.sig with payload {"sub":"u1"} — no valid signature.
+        // The gateway must NOT trust the `sub` of an unverified token.
+        let forged = "e30.eyJzdWIiOiJ1MSJ9.x";
+        assert!(crate::auth::verify_bearer(&format!("Bearer {forged}"), "secret").is_none());
+        assert!(crate::auth::verify_bearer("garbage", "secret").is_none());
     }
 }

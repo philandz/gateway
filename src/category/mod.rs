@@ -7,7 +7,7 @@ use axum::{
     Json, Router,
 };
 use serde::Deserialize;
-use tonic::{metadata::MetadataValue, transport::Channel, Request as GrpcRequest, Status};
+use tonic::{transport::Channel, Request as GrpcRequest, Status};
 
 use crate::pb::service::category as pb;
 use crate::pb::service::category::category_service_client::CategoryServiceClient;
@@ -49,6 +49,19 @@ async fn health(State(state): State<Arc<AppState>>) -> ApiResult<&'static str> {
     }
 }
 
+/// JSON label for a category type.
+///
+/// The REST DTO layer must NOT emit the raw protobuf enum — serde emits the
+/// Rust variant name ("Expense"), while the clients compare against the
+/// canonical lowercase labels ("expense").
+fn category_type_to_string(v: i32) -> &'static str {
+    match pb::CategoryType::try_from(v).unwrap_or(pb::CategoryType::Unspecified) {
+        pb::CategoryType::Expense => "expense",
+        pb::CategoryType::Income => "income",
+        pb::CategoryType::Unspecified => "expense",
+    }
+}
+
 fn map_status(status: Status) -> (StatusCode, Json<ErrorResponse>) {
     let (http, envelope) = philand_error::http_error_from_tonic_status(&status);
     (http, Json(envelope))
@@ -60,122 +73,11 @@ async fn client(state: &AppState) -> ApiResult<CategoryServiceClient<Channel>> {
         .map_err(|e| map_status(Status::internal(e.to_string())))
 }
 
-fn with_user<T>(headers: &HeaderMap, req: T) -> ApiResult<GrpcRequest<T>> {
-    let auth = headers
-        .get("authorization")
-        .and_then(|v| v.to_str().ok())
-        .ok_or_else(|| map_status(Status::unauthenticated("Missing Authorization header")))?;
-
-    let mut grpc_req = GrpcRequest::new(req);
-    let value = MetadataValue::try_from(auth)
-        .map_err(|_| map_status(Status::unauthenticated("Invalid Authorization header")))?;
-    grpc_req.metadata_mut().insert("authorization", value);
-
-    if let Some(user_id) = extract_sub(auth) {
-        if let Ok(v) = MetadataValue::try_from(user_id.as_str()) {
-            grpc_req.metadata_mut().insert("x-user-id", v);
-        }
-    }
-    if let Some(user_type) = extract_user_type(auth) {
-        if let Ok(v) = MetadataValue::try_from(user_type.as_str()) {
-            grpc_req.metadata_mut().insert("x-user-type", v);
-        }
-    }
-    Ok(grpc_req)
-}
-
-fn extract_sub(bearer: &str) -> Option<String> {
-    let token = bearer.strip_prefix("Bearer ")?;
-    let payload = token.split('.').nth(1)?;
-    let decoded = base64url_decode(payload)?;
-    let claims: serde_json::Value = serde_json::from_slice(&decoded).ok()?;
-    claims
-        .get("sub")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string())
-}
-
-/// Extract `user_type` claim from a Bearer JWT without signature verification.
-fn extract_user_type(bearer: &str) -> Option<String> {
-    let token = bearer.strip_prefix("Bearer ")?;
-    let payload = token.split('.').nth(1)?;
-    let decoded = base64url_decode(payload)?;
-    let claims: serde_json::Value = serde_json::from_slice(&decoded).ok()?;
-    claims
-        .get("user_type")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string())
-}
-
-fn base64url_decode(input: &str) -> Option<Vec<u8>> {
-    let mut s = input.replace('-', "+").replace('_', "/");
-    match s.len() % 4 {
-        2 => s.push_str("=="),
-        3 => s.push('='),
-        _ => {}
-    }
-    let bytes = s.as_bytes();
-    const T: [u8; 128] = {
-        let mut t = [0xffu8; 128];
-        let mut i = 0u8;
-        while i < 26 {
-            t[(b'A' + i) as usize] = i;
-            i += 1;
-        }
-        i = 0;
-        while i < 26 {
-            t[(b'a' + i) as usize] = 26 + i;
-            i += 1;
-        }
-        i = 0;
-        while i < 10 {
-            t[(b'0' + i) as usize] = 52 + i;
-            i += 1;
-        }
-        t[b'+' as usize] = 62;
-        t[b'/' as usize] = 63;
-        t
-    };
-    let mut out = Vec::with_capacity(bytes.len() * 3 / 4);
-    let mut idx = 0;
-    while idx + 3 < bytes.len() {
-        let (b0, b1, b2, b3) = (
-            bytes[idx] as usize,
-            bytes[idx + 1] as usize,
-            bytes[idx + 2] as usize,
-            bytes[idx + 3] as usize,
-        );
-        if b0 >= 128 || b1 >= 128 {
-            return None;
-        }
-        let (v0, v1) = (T[b0], T[b1]);
-        if v0 == 0xff || v1 == 0xff {
-            return None;
-        }
-        out.push((v0 << 2) | (v1 >> 4));
-        if bytes[idx + 2] != b'=' {
-            if b2 >= 128 {
-                return None;
-            }
-            let v2 = T[b2];
-            if v2 == 0xff {
-                return None;
-            }
-            out.push((v1 << 4) | (v2 >> 2));
-            if bytes[idx + 3] != b'=' {
-                if b3 >= 128 {
-                    return None;
-                }
-                let v3 = T[b3];
-                if v3 == 0xff {
-                    return None;
-                }
-                out.push((v2 << 6) | v3);
-            }
-        }
-        idx += 4;
-    }
-    Some(out)
+fn with_user<T>(state: &AppState, headers: &HeaderMap, req: T) -> ApiResult<GrpcRequest<T>> {
+    // SECURITY: verify the bearer token before forwarding the `sub` claim —
+    // the category service trusts `x-user-id` at face value.
+    crate::auth::request_with_user(&state.jwt_secret, headers, req)
+        .map_err(|e| map_status(Status::unauthenticated(e.message())))
 }
 
 // ---------------------------------------------------------------------------
@@ -237,6 +139,7 @@ async fn list_categories(
     let mut c = client(&state).await?;
     let resp = c
         .list_categories(with_user(
+            &state,
             &headers,
             pb::ListCategoriesRequest { budget_id },
         )?)
@@ -256,6 +159,7 @@ async fn create_category(
     let mut c = client(&state).await?;
     let resp = c
         .create_category(with_user(
+            &state,
             &headers,
             pb::CreateCategoryRequest {
                 budget_id,
@@ -279,7 +183,11 @@ async fn get_category(
 ) -> ApiResult<Json<serde_json::Value>> {
     let mut c = client(&state).await?;
     let resp = c
-        .get_category(with_user(&headers, pb::GetCategoryRequest { category_id })?)
+        .get_category(with_user(
+            &state,
+            &headers,
+            pb::GetCategoryRequest { category_id },
+        )?)
         .await
         .map_err(map_status)?
         .into_inner();
@@ -297,6 +205,7 @@ async fn update_category(
     let mut c = client(&state).await?;
     let resp = c
         .update_category(with_user(
+            &state,
             &headers,
             pb::UpdateCategoryRequest {
                 category_id,
@@ -319,6 +228,7 @@ async fn archive_category(
 ) -> ApiResult<Json<serde_json::Value>> {
     let mut c = client(&state).await?;
     c.archive_category(with_user(
+        &state,
         &headers,
         pb::ArchiveCategoryRequest { category_id },
     )?)
@@ -334,6 +244,7 @@ async fn delete_category(
 ) -> ApiResult<Json<serde_json::Value>> {
     let mut c = client(&state).await?;
     c.delete_category(with_user(
+        &state,
         &headers,
         pb::DeleteCategoryRequest { category_id },
     )?)
@@ -357,7 +268,7 @@ fn map_cat(c: &pb::Category) -> serde_json::Value {
         })).unwrap_or(serde_json::Value::Null),
         "budget_id":      c.budget_id,
         "name":           c.name,
-        "kind":           c.kind,
+        "kind":           category_type_to_string(c.kind),
         "icon":           c.icon,
         "color":          c.color,
         "planned_amount": c.planned_amount,
@@ -414,7 +325,7 @@ fn map_plan(p: &pb::BudgetPlan) -> serde_json::Value {
             serde_json::json!({
                 "category_id":     c.category_id,
                 "name":            c.name,
-                "kind":            c.kind,
+                "kind":            category_type_to_string(c.kind),
                 "icon":            c.icon,
                 "color":           c.color,
                 "default_planned": c.default_planned,
@@ -443,6 +354,7 @@ async fn get_plan(
     let mut c = client(&state).await?;
     let resp = c
         .get_plan(with_user(
+            &state,
             &headers,
             pb::GetPlanRequest {
                 budget_id,
@@ -475,6 +387,7 @@ async fn set_plan(
     let mut c = client(&state).await?;
     let resp = c
         .set_period_plan(with_user(
+            &state,
             &headers,
             pb::SetPeriodPlanRequest {
                 budget_id,

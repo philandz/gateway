@@ -12,8 +12,6 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use base64::Engine as _;
 use serde::Deserialize;
 use tonic::{metadata::MetadataValue, transport::Channel, Request as GrpcRequest};
 use tracing::warn;
@@ -154,15 +152,13 @@ async fn get_portfolio_summary(
     }
     let mut client = connect(&state).await?;
     let req = make_req(
+        &state,
         &headers,
         pb::GetPortfolioSummaryRequest {
             budget_id: budget_id.clone(),
         },
     )?;
-    let resp = client
-        .get_portfolio_summary(req)
-        .await
-        .map_err(into_api_err)?;
+    let resp = client.get_portfolio_summary(req).await.map_err(api_err)?;
     Ok(Json(to_json_or_log(
         &resp.into_inner(),
         "GetPortfolioSummaryResponse",
@@ -181,6 +177,7 @@ async fn list_assets(
     }
     let mut client = connect(&state).await?;
     let req = make_req(
+        &state,
         &headers,
         pb::ListAssetsRequest {
             budget_id: budget_id.clone(),
@@ -188,7 +185,7 @@ async fn list_assets(
             page_size: p.page_size.unwrap_or(0),
         },
     )?;
-    let resp = client.list_assets(req).await.map_err(into_api_err)?;
+    let resp = client.list_assets(req).await.map_err(api_err)?;
     Ok(Json(to_json_or_log(
         &resp.into_inner(),
         "ListAssetsResponse",
@@ -234,13 +231,14 @@ async fn get_asset(
 ) -> ApiResult<Json<pb::GetAssetResponse>> {
     let mut client = connect(&state).await?;
     let req = make_req(
+        &state,
         &headers,
         pb::GetAssetRequest {
             budget_id,
             asset_id,
         },
     )?;
-    let resp = client.get_asset(req).await.map_err(into_api_err)?;
+    let resp = client.get_asset(req).await.map_err(api_err)?;
     Ok(Json(resp.into_inner()))
 }
 
@@ -252,6 +250,7 @@ async fn update_asset_metadata(
 ) -> ApiResult<Json<pb::PortfolioAsset>> {
     let mut client = connect(&state).await?;
     let req = make_req(
+        &state,
         &headers,
         pb::UpdateAssetMetadataRequest {
             budget_id,
@@ -260,10 +259,7 @@ async fn update_asset_metadata(
             notes: body.notes,
         },
     )?;
-    let resp = client
-        .update_asset_metadata(req)
-        .await
-        .map_err(into_api_err)?;
+    let resp = client.update_asset_metadata(req).await.map_err(api_err)?;
     Ok(Json(resp.into_inner()))
 }
 
@@ -274,13 +270,14 @@ async fn archive_asset(
 ) -> ApiResult<Json<pb::PortfolioAsset>> {
     let mut client = connect(&state).await?;
     let req = make_req(
+        &state,
         &headers,
         pb::ArchiveAssetRequest {
             budget_id,
             asset_id,
         },
     )?;
-    let resp = client.archive_asset(req).await.map_err(into_api_err)?;
+    let resp = client.archive_asset(req).await.map_err(api_err)?;
     Ok(Json(resp.into_inner()))
 }
 
@@ -292,11 +289,8 @@ async fn create_savings_account(
 ) -> ApiResult<Json<pb::PortfolioAsset>> {
     let mut client = connect(&state).await?;
     body.budget_id = budget_id;
-    let req = make_req(&headers, pb::CreateSavingsAccountRequest { ..body })?;
-    let resp = client
-        .create_savings_account(req)
-        .await
-        .map_err(into_api_err)?;
+    let req = make_req(&state, &headers, pb::CreateSavingsAccountRequest { ..body })?;
+    let resp = client.create_savings_account(req).await.map_err(api_err)?;
     Ok(Json(resp.into_inner()))
 }
 
@@ -308,11 +302,8 @@ async fn create_fixed_deposit(
 ) -> ApiResult<Json<pb::PortfolioAsset>> {
     let mut client = connect(&state).await?;
     body.budget_id = budget_id;
-    let req = make_req(&headers, pb::CreateFixedDepositRequest { ..body })?;
-    let resp = client
-        .create_fixed_deposit(req)
-        .await
-        .map_err(into_api_err)?;
+    let req = make_req(&state, &headers, pb::CreateFixedDepositRequest { ..body })?;
+    let resp = client.create_fixed_deposit(req).await.map_err(api_err)?;
     Ok(Json(resp.into_inner()))
 }
 
@@ -324,8 +315,8 @@ async fn create_gold_lot(
 ) -> ApiResult<Json<pb::PortfolioAsset>> {
     let mut client = connect(&state).await?;
     body.budget_id = budget_id;
-    let req = make_req(&headers, pb::CreateGoldLotRequest { ..body })?;
-    let resp = client.create_gold_lot(req).await.map_err(into_api_err)?;
+    let req = make_req(&state, &headers, pb::CreateGoldLotRequest { ..body })?;
+    let resp = client.create_gold_lot(req).await.map_err(api_err)?;
     Ok(Json(resp.into_inner()))
 }
 
@@ -337,8 +328,8 @@ async fn create_stock_lot(
 ) -> ApiResult<Json<pb::PortfolioAsset>> {
     let mut client = connect(&state).await?;
     body.budget_id = budget_id;
-    let req = make_req(&headers, pb::CreateStockLotRequest { ..body })?;
-    let resp = client.create_stock_lot(req).await.map_err(into_api_err)?;
+    let req = make_req(&state, &headers, pb::CreateStockLotRequest { ..body })?;
+    let resp = client.create_stock_lot(req).await.map_err(api_err)?;
     Ok(Json(resp.into_inner()))
 }
 
@@ -350,8 +341,8 @@ async fn create_etf_lot(
 ) -> ApiResult<Json<pb::PortfolioAsset>> {
     let mut client = connect(&state).await?;
     body.budget_id = budget_id;
-    let req = make_req(&headers, pb::CreateEtfLotRequest { ..body })?;
-    let resp = client.create_etf_lot(req).await.map_err(into_api_err)?;
+    let req = make_req(&state, &headers, pb::CreateEtfLotRequest { ..body })?;
+    let resp = client.create_etf_lot(req).await.map_err(api_err)?;
     Ok(Json(resp.into_inner()))
 }
 
@@ -363,8 +354,8 @@ async fn create_crypto_lot(
 ) -> ApiResult<Json<pb::PortfolioAsset>> {
     let mut client = connect(&state).await?;
     body.budget_id = budget_id;
-    let req = make_req(&headers, pb::CreateCryptoLotRequest { ..body })?;
-    let resp = client.create_crypto_lot(req).await.map_err(into_api_err)?;
+    let req = make_req(&state, &headers, pb::CreateCryptoLotRequest { ..body })?;
+    let resp = client.create_crypto_lot(req).await.map_err(api_err)?;
     Ok(Json(resp.into_inner()))
 }
 
@@ -377,13 +368,14 @@ async fn record_price_observation(
     let mut client = connect(&state).await?;
     body.budget_id = budget_id;
     let req = make_req(
+        &state,
         &headers,
         pb::RecordPriceObservationRequest { asset_id, ..body },
     )?;
     let resp = client
         .record_price_observation(req)
         .await
-        .map_err(into_api_err)?;
+        .map_err(api_err)?;
     Ok(Json(resp.into_inner()))
 }
 
@@ -395,6 +387,7 @@ async fn list_observations(
 ) -> ApiResult<Json<pb::ListPriceObservationsResponse>> {
     let mut client = connect(&state).await?;
     let req = make_req(
+        &state,
         &headers,
         pb::ListPriceObservationsRequest {
             budget_id,
@@ -402,10 +395,7 @@ async fn list_observations(
             limit: q.limit.unwrap_or(50),
         },
     )?;
-    let resp = client
-        .list_price_observations(req)
-        .await
-        .map_err(into_api_err)?;
+    let resp = client.list_price_observations(req).await.map_err(api_err)?;
     Ok(Json(resp.into_inner()))
 }
 
@@ -417,6 +407,7 @@ async fn list_activity(
 ) -> ApiResult<Json<pb::ListAssetActivityResponse>> {
     let mut client = connect(&state).await?;
     let req = make_req(
+        &state,
         &headers,
         pb::ListAssetActivityRequest {
             budget_id,
@@ -424,10 +415,7 @@ async fn list_activity(
             limit: q.limit.unwrap_or(50),
         },
     )?;
-    let resp = client
-        .list_asset_activity(req)
-        .await
-        .map_err(into_api_err)?;
+    let resp = client.list_asset_activity(req).await.map_err(api_err)?;
     Ok(Json(resp.into_inner()))
 }
 
@@ -440,13 +428,11 @@ async fn record_stock_disposal(
     let mut client = connect(&state).await?;
     body.budget_id = budget_id;
     let req = make_req(
+        &state,
         &headers,
         pb::RecordStockDisposalRequest { asset_id, ..body },
     )?;
-    let resp = client
-        .record_stock_disposal(req)
-        .await
-        .map_err(into_api_err)?;
+    let resp = client.record_stock_disposal(req).await.map_err(api_err)?;
     Ok(Json(resp.into_inner()))
 }
 
@@ -458,8 +444,12 @@ async fn record_gold_disposal(
 ) -> ApiResult<Json<pb::PortfolioAsset>> {
     let mut client = connect(&state).await?;
     body.budget_id = budget_id;
-    let req = make_req(&headers, pb::RecordGoldDisposalRequest { asset_id, ..body })?;
-    let resp = client.record_gold_disposal(req).await.map_err(into_api_err)?;
+    let req = make_req(
+        &state,
+        &headers,
+        pb::RecordGoldDisposalRequest { asset_id, ..body },
+    )?;
+    let resp = client.record_gold_disposal(req).await.map_err(api_err)?;
     Ok(Json(resp.into_inner()))
 }
 
@@ -471,8 +461,15 @@ async fn record_deposit_maturity(
 ) -> ApiResult<Json<pb::PortfolioAsset>> {
     let mut client = connect(&state).await?;
     body.budget_id = budget_id;
-    let req = make_req(&headers, pb::RecordFixedDepositMaturityRequest { asset_id, ..body })?;
-    let resp = client.record_fixed_deposit_maturity(req).await.map_err(into_api_err)?;
+    let req = make_req(
+        &state,
+        &headers,
+        pb::RecordFixedDepositMaturityRequest { asset_id, ..body },
+    )?;
+    let resp = client
+        .record_fixed_deposit_maturity(req)
+        .await
+        .map_err(api_err)?;
     Ok(Json(resp.into_inner()))
 }
 
@@ -484,8 +481,15 @@ async fn record_deposit_rollover(
 ) -> ApiResult<Json<pb::PortfolioAsset>> {
     let mut client = connect(&state).await?;
     body.budget_id = budget_id;
-    let req = make_req(&headers, pb::RecordFixedDepositRolloverRequest { asset_id, ..body })?;
-    let resp = client.record_fixed_deposit_rollover(req).await.map_err(into_api_err)?;
+    let req = make_req(
+        &state,
+        &headers,
+        pb::RecordFixedDepositRolloverRequest { asset_id, ..body },
+    )?;
+    let resp = client
+        .record_fixed_deposit_rollover(req)
+        .await
+        .map_err(api_err)?;
     Ok(Json(resp.into_inner()))
 }
 
@@ -497,8 +501,8 @@ async fn deposit_to_fund(
 ) -> ApiResult<Json<pb::FundTransferResponse>> {
     let mut client = connect(&state).await?;
     body.budget_id = budget_id;
-    let req = make_req(&headers, body)?;
-    let resp = client.deposit_to_fund(req).await.map_err(fund_api_err)?;
+    let req = make_req(&state, &headers, body)?;
+    let resp = client.deposit_to_fund(req).await.map_err(api_err)?;
     Ok(Json(resp.into_inner()))
 }
 
@@ -510,8 +514,8 @@ async fn withdraw_from_fund(
 ) -> ApiResult<Json<pb::FundTransferResponse>> {
     let mut client = connect(&state).await?;
     body.budget_id = budget_id;
-    let req = make_req(&headers, body)?;
-    let resp = client.withdraw_from_fund(req).await.map_err(fund_api_err)?;
+    let req = make_req(&state, &headers, body)?;
+    let resp = client.withdraw_from_fund(req).await.map_err(api_err)?;
     Ok(Json(resp.into_inner()))
 }
 
@@ -523,8 +527,8 @@ async fn adjust_fund_cash(
 ) -> ApiResult<Json<pb::FundCashMovement>> {
     let mut client = connect(&state).await?;
     body.budget_id = budget_id;
-    let req = make_req(&headers, body)?;
-    let resp = client.adjust_fund_cash(req).await.map_err(fund_api_err)?;
+    let req = make_req(&state, &headers, body)?;
+    let resp = client.adjust_fund_cash(req).await.map_err(api_err)?;
     Ok(Json(resp.into_inner()))
 }
 
@@ -534,8 +538,8 @@ async fn get_fund_summary(
     headers: HeaderMap,
 ) -> ApiResult<Json<pb::FundSummary>> {
     let mut client = connect(&state).await?;
-    let req = make_req(&headers, pb::GetFundSummaryRequest { budget_id })?;
-    let resp = client.get_fund_summary(req).await.map_err(into_api_err)?;
+    let req = make_req(&state, &headers, pb::GetFundSummaryRequest { budget_id })?;
+    let resp = client.get_fund_summary(req).await.map_err(api_err)?;
     Ok(Json(resp.into_inner()))
 }
 
@@ -547,6 +551,7 @@ async fn list_fund_movements(
 ) -> ApiResult<Json<pb::ListFundCashMovementsResponse>> {
     let mut client = connect(&state).await?;
     let req = make_req(
+        &state,
         &headers,
         pb::ListFundCashMovementsRequest {
             budget_id,
@@ -557,7 +562,7 @@ async fn list_fund_movements(
     let resp = client
         .list_fund_cash_movements(req)
         .await
-        .map_err(into_api_err)?;
+        .map_err(api_err)?;
     Ok(Json(resp.into_inner()))
 }
 
@@ -574,40 +579,31 @@ async fn connect(
         .map_err(|e| internal_error(format!("connect: {e}")))
 }
 
-/// Forward inbound HTTP bearer to the gRPC upstream, decoding the JWT to
-/// populate x-user-id / x-user-type / x-service-actor metadata. Mirrors
-/// `gateway::budget::with_user` so the budget PortfolioService impl
+/// Forward inbound HTTP bearer to the gRPC upstream, populating
+/// x-user-id / x-user-type / x-service-actor metadata from a VERIFIED token.
+/// Mirrors `gateway::budget::with_user` so the budget PortfolioService impl
 /// receives the same auth context as the rest of the budget routes.
 fn make_req<T>(
+    state: &AppState,
     headers: &HeaderMap,
     body: T,
 ) -> Result<GrpcRequest<T>, (StatusCode, Json<ErrorResponse>)> {
-    let auth = headers
-        .get("authorization")
-        .and_then(|v| v.to_str().ok())
-        .ok_or_else(|| unauth("Missing Authorization header"))?;
-
-    let mut grpc_req = GrpcRequest::new(body);
-    let value =
-        MetadataValue::try_from(auth).map_err(|_| unauth("Invalid Authorization header"))?;
-    grpc_req.metadata_mut().insert("authorization", value);
+    // SECURITY: the portfolio service trusts `x-user-id` at face value, so the
+    // gateway verifies the signature and expiry before forwarding the claim.
+    let mut grpc_req = crate::auth::request_with_user(&state.jwt_secret, headers, body)
+        .map_err(|e| unauth(e.message()))?;
 
     // Strip any inbound service-actor header — clients never escalate.
     grpc_req.metadata_mut().remove("x-service-actor");
 
-    if let Some(user_id) = decode_sub(auth) {
-        if let Ok(v) = MetadataValue::try_from(user_id.as_str()) {
-            grpc_req.metadata_mut().insert("x-user-id", v);
-        }
-    }
-    if let Some(user_type) = decode_user_type(auth) {
-        if let Ok(v) = MetadataValue::try_from(user_type.as_str()) {
-            grpc_req.metadata_mut().insert("x-user-type", v);
-        }
-        if user_type == "super_admin" {
-            if let Ok(v) = MetadataValue::try_from("true") {
-                grpc_req.metadata_mut().insert("x-service-actor", v);
-            }
+    let is_super_admin = grpc_req
+        .metadata()
+        .get("x-user-type")
+        .and_then(|v| v.to_str().ok())
+        == Some("super_admin");
+    if is_super_admin {
+        if let Ok(v) = MetadataValue::try_from("true") {
+            grpc_req.metadata_mut().insert("x-service-actor", v);
         }
     }
 
@@ -625,45 +621,15 @@ fn unauth(msg: &str) -> (StatusCode, Json<ErrorResponse>) {
     )
 }
 
-/// Decode the `sub` claim from a Bearer JWT without signature verification.
-/// Matches the format the identity service signs with `JWT_SECRET`.
-fn decode_sub(bearer: &str) -> Option<String> {
-    let token = bearer.strip_prefix("Bearer ")?;
-    let parts: Vec<&str> = token.split('.').collect();
-    if parts.len() != 3 {
-        return None;
-    }
-    let payload = base64_url_decode(parts[1])?;
-    let v: serde_json::Value = serde_json::from_slice(&payload).ok()?;
-    v.get("sub").and_then(|v| v.as_str()).map(String::from)
-}
-
-fn decode_user_type(bearer: &str) -> Option<String> {
-    let token = bearer.strip_prefix("Bearer ")?;
-    let parts: Vec<&str> = token.split('.').collect();
-    if parts.len() != 3 {
-        return None;
-    }
-    let payload = base64_url_decode(parts[1])?;
-    let v: serde_json::Value = serde_json::from_slice(&payload).ok()?;
-    v.get("user_type")
-        .and_then(|v| v.as_str())
-        .map(String::from)
-}
-
-fn base64_url_decode(s: &str) -> Option<Vec<u8>> {
-    URL_SAFE_NO_PAD.decode(s).ok()
-}
-
-/// Fund writes surface business errors (insufficient cash, bad input) with
-/// their real HTTP class instead of the legacy blanket 500.
-fn fund_api_err(e: tonic::Status) -> (StatusCode, Json<ErrorResponse>) {
+/// Maps a gRPC status to its real HTTP class.
+///
+/// Every business error must keep its class: NOT_FOUND -> 404,
+/// INVALID_ARGUMENT -> 400, FAILED_PRECONDITION -> 412, PERMISSION_DENIED ->
+/// 403. The old blanket 500 hid all of them behind "internal error", so a
+/// missing asset and a rejected write were indistinguishable to the client.
+fn api_err(e: tonic::Status) -> (StatusCode, Json<ErrorResponse>) {
     let (http, env) = philand_error::http_error_from_tonic_status(&e);
     (http, Json(env))
-}
-
-fn into_api_err(e: tonic::Status) -> (StatusCode, Json<ErrorResponse>) {
-    internal_error(format!("{e}"))
 }
 
 fn internal_error(msg: String) -> (StatusCode, Json<ErrorResponse>) {

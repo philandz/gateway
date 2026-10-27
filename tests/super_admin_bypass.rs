@@ -222,9 +222,31 @@ impl BudgetService for CapturingBudgetSvc {
     }
 }
 
+/// Shared secret the gateway under test verifies bearer tokens with.
+const TEST_SECRET: &str = "test-secret";
+
 fn make_jwt(user_type: &str) -> String {
-    // Lightweight unsigned JWT (gateway's extract_user_type* decoders only
-    // base64url-decode the payload — they do not verify the signature).
+    // A REAL HS256 token signed with the shared secret: the gateway verifies
+    // the signature (and expiry) before it trusts the `sub` / `user_type`
+    // claims, so the test has to sign it properly.
+    let claims = serde_json::json!({
+        "sub": Uuid::new_v4().to_string(),
+        "email": "super@philand.test",
+        "org_id": "00000000-0000-0000-0000-000000000001",
+        "user_type": user_type,
+        "exp": 9_999_999_999u64,
+    });
+    jsonwebtoken::encode(
+        &jsonwebtoken::Header::default(),
+        &claims,
+        &jsonwebtoken::EncodingKey::from_secret(TEST_SECRET.as_bytes()),
+    )
+    .expect("sign test token")
+}
+
+/// A token with a valid payload but a bogus signature — the gateway must
+/// refuse it instead of trusting the `user_type` / `sub` claims.
+fn make_forged_jwt(user_type: &str) -> String {
     let header = base64url(b"{\"alg\":\"none\",\"typ\":\"JWT\"}");
     let payload = base64url(format!(
         r#"{{"sub":"{}","email":"super@philand.test","org_id":"00000000-0000-0000-0000-000000000001","user_type":"{}","exp":9999999999}}"#,
@@ -238,6 +260,68 @@ fn base64url(input: &[u8]) -> String {
     use base64::engine::general_purpose::URL_SAFE_NO_PAD;
     use base64::Engine;
     URL_SAFE_NO_PAD.encode(input)
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn forged_super_admin_jwt_is_rejected() {
+    // SECURITY regression: the gateway used to decode the JWT payload without
+    // verifying the signature, so anyone could claim to be super_admin (or
+    // any other user) by sending an arbitrary payload.
+    let captured: Arc<Mutex<Option<tonic::metadata::MetadataMap>>> = Arc::new(Mutex::new(None));
+    let svc = CapturingBudgetSvc {
+        last_md: captured.clone(),
+    };
+
+    // Spawn the mock budget gRPC server on an ephemeral port.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap().port();
+    tokio::spawn(async move {
+        tonic::transport::Server::builder()
+            .add_service(BudgetServiceServer::new(svc))
+            .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener))
+            .await
+            .unwrap();
+    });
+    let state = Arc::new(gateway::AppState {
+        client: reqwest::Client::new(),
+        monolith_url: "http://127.0.0.1:1".to_string(),
+        identity_url: "http://127.0.0.1:1".to_string(),
+        media_url: "http://127.0.0.1:1".to_string(),
+        identity_grpc_url: "http://127.0.0.1:1".to_string(),
+        media_grpc_url: "http://127.0.0.1:1".to_string(),
+        budget_grpc_url: format!("http://127.0.0.1:{addr}"),
+        portfolio_grpc_url: format!("http://127.0.0.1:{addr}"),
+        category_grpc_url: "http://127.0.0.1:1".to_string(),
+        insight_grpc_url: "http://127.0.0.1:1".to_string(),
+        entry_grpc_url: "http://127.0.0.1:1".to_string(),
+        sharing_grpc_url: "http://127.0.0.1:1".to_string(),
+        identity_transport: gateway::IdentityTransport::GrpcTranscode,
+        jwt_secret: TEST_SECRET.to_string(),
+    });
+    let app = gateway::budget::router().with_state(state);
+
+    use axum::body::Body;
+    use axum::http::{header, Request as HttpRequest};
+    use tower::ServiceExt;
+
+    let jwt = make_forged_jwt("super_admin");
+    let req = HttpRequest::builder()
+        .method("GET")
+        .uri("/budgets/ef4a838b-0fad-4c1f-ac92-0f0a2ffaaaa9")
+        .header(header::AUTHORIZATION, format!("Bearer {jwt}"))
+        .body(Body::empty())
+        .unwrap();
+
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(
+        resp.status(),
+        401,
+        "a forged JWT must be rejected, never forwarded downstream"
+    );
+    assert!(
+        captured.lock().is_none(),
+        "the downstream service must not see a forged token"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -275,6 +359,7 @@ async fn super_admin_jwt_passes_through_gateway_with_user_type_metadata() {
         entry_grpc_url: "http://127.0.0.1:1".to_string(),
         sharing_grpc_url: "http://127.0.0.1:1".to_string(),
         identity_transport: gateway::IdentityTransport::GrpcTranscode,
+        jwt_secret: TEST_SECRET.to_string(),
     });
     let app = gateway::budget::router().with_state(state);
 

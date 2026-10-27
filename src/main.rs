@@ -57,6 +57,7 @@ async fn main() -> anyhow::Result<()> {
         entry_grpc_url,
         sharing_grpc_url,
         identity_transport,
+        jwt_secret: config.jwt_secret,
     });
 
     let cors = CorsLayer::new()
@@ -83,7 +84,8 @@ async fn main() -> anyhow::Result<()> {
             .nest("/sharing", gateway::sharing::router())
             .nest("/portfolios", gateway::portfolio::router()),
     }
-    .layer(middleware::from_fn(
+    .layer(middleware::from_fn_with_state(
+        state.clone(),
         gateway::middleware::reject_super_admin_on_user_paths,
     ));
 

@@ -7,7 +7,7 @@ use axum::{
     Json, Router,
 };
 use serde::Deserialize;
-use tonic::{metadata::MetadataValue, transport::Channel, Request as GrpcRequest, Status};
+use tonic::{transport::Channel, Request as GrpcRequest, Status};
 
 use crate::pb::service::entry as pb;
 use crate::pb::service::entry::entry_service_client::EntryServiceClient;
@@ -76,6 +76,21 @@ async fn health(State(state): State<Arc<AppState>>) -> ApiResult<&'static str> {
     }
 }
 
+/// JSON label for an entry kind.
+///
+/// The REST DTO layer must NOT emit the raw protobuf enum — serde emits the
+/// Rust variant name ("Expense"), while the clients compare against the
+/// canonical lowercase labels ("expense").
+fn entry_kind_to_string(v: i32) -> &'static str {
+    match pb::EntryKind::try_from(v).unwrap_or(pb::EntryKind::Unspecified) {
+        pb::EntryKind::Expense => "expense",
+        pb::EntryKind::Income => "income",
+        pb::EntryKind::TransferOut => "transfer_out",
+        pb::EntryKind::TransferIn => "transfer_in",
+        pb::EntryKind::Unspecified => "expense",
+    }
+}
+
 fn map_status(s: Status) -> (StatusCode, Json<ErrorResponse>) {
     let (http, env) = philand_error::http_error_from_tonic_status(&s);
     (http, Json(env))
@@ -87,128 +102,14 @@ async fn client(state: &AppState) -> ApiResult<EntryServiceClient<Channel>> {
         .map_err(|e| map_status(Status::internal(e.to_string())))
 }
 
-fn with_user<T>(headers: &HeaderMap, req: T) -> ApiResult<GrpcRequest<T>> {
-    let auth = headers
-        .get("authorization")
-        .and_then(|v| v.to_str().ok())
-        .ok_or_else(|| map_status(Status::unauthenticated("Missing Authorization header")))?;
-    let mut grpc_req = GrpcRequest::new(req);
-    let value = MetadataValue::try_from(auth)
-        .map_err(|_| map_status(Status::unauthenticated("Invalid Authorization header")))?;
-    grpc_req.metadata_mut().insert("authorization", value);
-    if let Some(uid) = extract_sub(auth) {
-        if let Ok(v) = MetadataValue::try_from(uid.as_str()) {
-            grpc_req.metadata_mut().insert("x-user-id", v);
-        }
-    }
-    // Forward user_type so the downstream service can grant super_admin the
-    // Owner role without an explicit budget_members row (see
-    // budget/src/manager/biz/mod.rs `resolve_role`, mirrored by entry / category
-    // / sharing / insight). The gateway otherwise drops the JWT claim on the
-    // floor and super admin tokens get 403 on every per-budget read.
-    if let Some(ut) = extract_user_type(auth) {
-        if let Ok(v) = MetadataValue::try_from(ut.as_str()) {
-            grpc_req.metadata_mut().insert("x-user-type", v);
-        }
-    }
-    Ok(grpc_req)
-}
-
-fn extract_sub(bearer: &str) -> Option<String> {
-    let token = bearer.strip_prefix("Bearer ")?;
-    let payload = token.split('.').nth(1)?;
-    let decoded = base64url_decode(payload)?;
-    let claims: serde_json::Value = serde_json::from_slice(&decoded).ok()?;
-    claims
-        .get("sub")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string())
-}
-
-/// Extract `user_type` claim from a Bearer JWT without signature verification.
-/// Unverified because the gateway doesn't have the secret — the identity
-/// service already verified the signature when it issued the token. This is
-/// the same pattern used in `gateway/src/budget/mod.rs`.
-fn extract_user_type(bearer: &str) -> Option<String> {
-    let token = bearer.strip_prefix("Bearer ")?;
-    let payload = token.split('.').nth(1)?;
-    let decoded = base64url_decode(payload)?;
-    let claims: serde_json::Value = serde_json::from_slice(&decoded).ok()?;
-    claims
-        .get("user_type")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string())
-}
-
-fn base64url_decode(input: &str) -> Option<Vec<u8>> {
-    let mut s = input.replace('-', "+").replace('_', "/");
-    match s.len() % 4 {
-        2 => s.push_str("=="),
-        3 => s.push('='),
-        _ => {}
-    }
-    let bytes = s.as_bytes();
-    const T: [u8; 128] = {
-        let mut t = [0xffu8; 128];
-        let mut i = 0u8;
-        while i < 26 {
-            t[(b'A' + i) as usize] = i;
-            i += 1;
-        }
-        i = 0;
-        while i < 26 {
-            t[(b'a' + i) as usize] = 26 + i;
-            i += 1;
-        }
-        i = 0;
-        while i < 10 {
-            t[(b'0' + i) as usize] = 52 + i;
-            i += 1;
-        }
-        t[b'+' as usize] = 62;
-        t[b'/' as usize] = 63;
-        t
-    };
-    let mut out = Vec::with_capacity(bytes.len() * 3 / 4);
-    let mut idx = 0;
-    while idx + 3 < bytes.len() {
-        let (b0, b1, b2, b3) = (
-            bytes[idx] as usize,
-            bytes[idx + 1] as usize,
-            bytes[idx + 2] as usize,
-            bytes[idx + 3] as usize,
-        );
-        if b0 >= 128 || b1 >= 128 {
-            return None;
-        }
-        let (v0, v1) = (T[b0], T[b1]);
-        if v0 == 0xff || v1 == 0xff {
-            return None;
-        }
-        out.push((v0 << 2) | (v1 >> 4));
-        if bytes[idx + 2] != b'=' {
-            if b2 >= 128 {
-                return None;
-            }
-            let v2 = T[b2];
-            if v2 == 0xff {
-                return None;
-            }
-            out.push((v1 << 4) | (v2 >> 2));
-            if bytes[idx + 3] != b'=' {
-                if b3 >= 128 {
-                    return None;
-                }
-                let v3 = T[b3];
-                if v3 == 0xff {
-                    return None;
-                }
-                out.push((v2 << 6) | v3);
-            }
-        }
-        idx += 4;
-    }
-    Some(out)
+fn with_user<T>(state: &AppState, headers: &HeaderMap, req: T) -> ApiResult<GrpcRequest<T>> {
+    // SECURITY: verify the bearer token before forwarding the `sub` claim —
+    // the entry service trusts `x-user-id` at face value. The `user_type`
+    // claim is forwarded too, so downstream services can grant super_admin
+    // the Owner role without an explicit budget_members row (see
+    // budget/src/manager/biz/mod.rs `resolve_role`).
+    crate::auth::request_with_user(&state.jwt_secret, headers, req)
+        .map_err(|e| map_status(Status::unauthenticated(e.message())))
 }
 
 // ---------------------------------------------------------------------------
@@ -331,6 +232,7 @@ async fn create_entry(
     let mut c = client(&state).await?;
     let resp = c
         .create_entry(with_user(
+            &state,
             &headers,
             pb::CreateEntryRequest {
                 budget_id: body.budget_id,
@@ -359,7 +261,11 @@ async fn get_entry(
 ) -> ApiResult<Json<serde_json::Value>> {
     let mut c = client(&state).await?;
     let resp = c
-        .get_entry(with_user(&headers, pb::GetEntryRequest { entry_id })?)
+        .get_entry(with_user(
+            &state,
+            &headers,
+            pb::GetEntryRequest { entry_id },
+        )?)
         .await
         .map_err(map_status)?
         .into_inner();
@@ -424,6 +330,7 @@ async fn list_entries(
     };
     let resp = c
         .list_entries(with_user(
+            &state,
             &headers,
             pb::ListEntriesRequest {
                 budget_id: Some(budget_id),
@@ -505,6 +412,7 @@ async fn list_all_entries(
     };
     let resp = c
         .list_entries(with_user(
+            &state,
             &headers,
             pb::ListEntriesRequest {
                 budget_id: None,
@@ -532,6 +440,7 @@ async fn update_entry(
     let mut c = client(&state).await?;
     let resp = c
         .update_entry(with_user(
+            &state,
             &headers,
             pb::UpdateEntryRequest {
                 entry_id,
@@ -556,9 +465,13 @@ async fn delete_entry(
     headers: HeaderMap,
 ) -> ApiResult<Json<serde_json::Value>> {
     let mut c = client(&state).await?;
-    c.delete_entry(with_user(&headers, pb::DeleteEntryRequest { entry_id })?)
-        .await
-        .map_err(map_status)?;
+    c.delete_entry(with_user(
+        &state,
+        &headers,
+        pb::DeleteEntryRequest { entry_id },
+    )?)
+    .await
+    .map_err(map_status)?;
     Ok(Json(serde_json::json!({"message": "Entry deleted"})))
 }
 
@@ -584,6 +497,7 @@ async fn bulk_import(
         .collect();
     let resp = c
         .bulk_import_entries(with_user(
+            &state,
             &headers,
             pb::BulkImportEntriesRequest { budget_id, rows },
         )?)
@@ -607,6 +521,7 @@ async fn add_comment(
     let mut c = client(&state).await?;
     let resp = c
         .add_comment(with_user(
+            &state,
             &headers,
             pb::AddCommentRequest {
                 entry_id,
@@ -628,6 +543,7 @@ async fn edit_comment(
     let mut c = client(&state).await?;
     let resp = c
         .edit_comment(with_user(
+            &state,
             &headers,
             pb::EditCommentRequest {
                 comment_id,
@@ -647,6 +563,7 @@ async fn delete_comment(
 ) -> ApiResult<Json<serde_json::Value>> {
     let mut c = client(&state).await?;
     c.delete_comment(with_user(
+        &state,
         &headers,
         pb::DeleteCommentRequest { comment_id },
     )?)
@@ -662,7 +579,11 @@ async fn list_comments(
 ) -> ApiResult<Json<serde_json::Value>> {
     let mut c = client(&state).await?;
     let resp = c
-        .list_comments(with_user(&headers, pb::ListCommentsRequest { entry_id })?)
+        .list_comments(with_user(
+            &state,
+            &headers,
+            pb::ListCommentsRequest { entry_id },
+        )?)
         .await
         .map_err(map_status)?
         .into_inner();
@@ -679,6 +600,7 @@ async fn attach_file(
     let mut c = client(&state).await?;
     let resp = c
         .attach_file(with_user(
+            &state,
             &headers,
             pb::AttachFileRequest {
                 entry_id,
@@ -699,6 +621,7 @@ async fn remove_attachment(
 ) -> ApiResult<Json<serde_json::Value>> {
     let mut c = client(&state).await?;
     c.remove_attachment(with_user(
+        &state,
         &headers,
         pb::RemoveAttachmentRequest { attachment_id },
     )?)
@@ -715,6 +638,7 @@ async fn list_attachments(
     let mut c = client(&state).await?;
     let resp = c
         .list_attachments(with_user(
+            &state,
             &headers,
             pb::ListAttachmentsRequest { entry_id },
         )?)
@@ -738,6 +662,7 @@ async fn create_recurring(
     let mut c = client(&state).await?;
     let resp = c
         .create_recurring_entry(with_user(
+            &state,
             &headers,
             pb::CreateRecurringEntryRequest {
                 budget_id,
@@ -766,6 +691,7 @@ async fn update_recurrence(
     let mut c = client(&state).await?;
     let resp = c
         .update_recurrence_rule(with_user(
+            &state,
             &headers,
             pb::UpdateRecurrenceRuleRequest {
                 entry_id,
@@ -786,6 +712,7 @@ async fn cancel_recurrence(
     let mut c = client(&state).await?;
     let resp = c
         .cancel_recurrence(with_user(
+            &state,
             &headers,
             pb::CancelRecurrenceRequest { entry_id },
         )?)
@@ -819,6 +746,7 @@ async fn create_split(
         .collect();
     let resp = c
         .create_split_entry(with_user(
+            &state,
             &headers,
             pb::CreateSplitEntryRequest {
                 budget_id,
@@ -851,7 +779,11 @@ async fn list_split_legs(
 ) -> ApiResult<Json<serde_json::Value>> {
     let mut c = client(&state).await?;
     let resp = c
-        .list_split_legs(with_user(&headers, pb::ListSplitLegsRequest { entry_id })?)
+        .list_split_legs(with_user(
+            &state,
+            &headers,
+            pb::ListSplitLegsRequest { entry_id },
+        )?)
         .await
         .map_err(map_status)?
         .into_inner();
@@ -873,6 +805,7 @@ async fn get_entry_summary(
     let mut c = client(&state).await?;
     let resp = c
         .get_entry_summary(with_user(
+            &state,
             &headers,
             pb::GetEntrySummaryRequest { budget_id },
         )?)
@@ -907,7 +840,7 @@ fn map_entry(e: &pb::Entry) -> serde_json::Value {
         })).unwrap_or(serde_json::Value::Null),
         "budget_id": e.budget_id,
         "category_id": e.category_id,
-        "kind": e.kind,
+        "kind": entry_kind_to_string(e.kind),
         "amount": e.amount,
         "description": e.description,
         "entry_date": e.entry_date,
@@ -1006,6 +939,7 @@ async fn create_transfer(
     let mut c = client(&state).await?;
     let resp = c
         .create_transfer(with_user(
+            &state,
             &headers,
             pb::CreateTransferRequest {
                 source_budget_id: body.source_budget_id,
@@ -1032,6 +966,7 @@ async fn update_transfer(
     let mut c = client(&state).await?;
     let resp = c
         .update_transfer(with_user(
+            &state,
             &headers,
             pb::UpdateTransferRequest {
                 group_id,
@@ -1053,9 +988,13 @@ async fn delete_transfer(
     headers: HeaderMap,
 ) -> ApiResult<Json<serde_json::Value>> {
     let mut c = client(&state).await?;
-    c.delete_transfer(with_user(&headers, pb::DeleteTransferRequest { group_id })?)
-        .await
-        .map_err(map_status)?;
+    c.delete_transfer(with_user(
+        &state,
+        &headers,
+        pb::DeleteTransferRequest { group_id },
+    )?)
+    .await
+    .map_err(map_status)?;
     Ok(Json(serde_json::json!({"message": "Transfer deleted"})))
 }
 
