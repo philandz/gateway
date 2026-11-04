@@ -41,6 +41,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         format!("{}/protobuf/insight/insight.proto", proto_root),
         format!("{}/protobuf/sharing/sharing.proto", proto_root),
         format!("{}/protobuf/portfolio/portfolio.proto", proto_root),
+        format!("{}/protobuf/debt/debt.proto", proto_root),
         format!("{}/protobuf/shared/user/user.proto", proto_root),
         format!(
             "{}/protobuf/shared/organization/organization.proto",
@@ -95,6 +96,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             ".service.portfolio.RecordStockDisposalRequest",
             "#[serde(default)]",
         )
+        // Debt messages carry no enums: every field may be omitted by the caller.
+        .type_attribute(".service.debt", "#[serde(default)]")
         .compile_protos(&file_refs, &include_refs)?;
     Ok(())
 }

@@ -583,7 +583,7 @@ async fn connect(
 /// x-user-id / x-user-type / x-service-actor metadata from a VERIFIED token.
 /// Mirrors `gateway::budget::with_user` so the budget PortfolioService impl
 /// receives the same auth context as the rest of the budget routes.
-fn make_req<T>(
+pub(crate) fn make_req<T>(
     state: &AppState,
     headers: &HeaderMap,
     body: T,
@@ -627,12 +627,12 @@ fn unauth(msg: &str) -> (StatusCode, Json<ErrorResponse>) {
 /// INVALID_ARGUMENT -> 400, FAILED_PRECONDITION -> 412, PERMISSION_DENIED ->
 /// 403. The old blanket 500 hid all of them behind "internal error", so a
 /// missing asset and a rejected write were indistinguishable to the client.
-fn api_err(e: tonic::Status) -> (StatusCode, Json<ErrorResponse>) {
+pub(crate) fn api_err(e: tonic::Status) -> (StatusCode, Json<ErrorResponse>) {
     let (http, env) = philand_error::http_error_from_tonic_status(&e);
     (http, Json(env))
 }
 
-fn internal_error(msg: String) -> (StatusCode, Json<ErrorResponse>) {
+pub(crate) fn internal_error(msg: String) -> (StatusCode, Json<ErrorResponse>) {
     (
         StatusCode::INTERNAL_SERVER_ERROR,
         Json(ErrorResponse {

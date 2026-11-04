@@ -32,6 +32,9 @@ pub mod pb {
         pub mod portfolio {
             tonic::include_proto!("service.portfolio");
         }
+        pub mod debt {
+            tonic::include_proto!("service.debt");
+        }
     }
     pub mod shared {
         pub mod user {
@@ -49,6 +52,7 @@ pub mod pb {
 pub mod auth;
 pub mod budget;
 pub mod category;
+pub mod debt;
 pub mod entry;
 pub mod identity;
 pub mod insight;

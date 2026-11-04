@@ -76,7 +76,9 @@ async fn main() -> anyhow::Result<()> {
             // /api/budget/budgets/{id}/portfolio/... (kept alongside /portfolios).
             .nest(
                 "/budget",
-                gateway::budget::router().merge(gateway::portfolio::router()),
+                gateway::budget::router()
+                    .merge(gateway::portfolio::router())
+                    .merge(gateway::debt::router()),
             )
             .nest("/category", gateway::category::router())
             .nest("/insight", gateway::insight::router())
