@@ -172,6 +172,7 @@ struct LegBody {
     user_id: String,
     amount: i64,
     #[serde(default)]
+    #[allow(dead_code)]
     weight: i64,
 }
 
