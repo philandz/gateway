@@ -1,5 +1,8 @@
 // tonic::Status is large; allow result_large_err across the crate
 #![allow(clippy::result_large_err)]
+// The double_must_use lint is raised by tonic/prost-generated code (include_proto!),
+// which we cannot edit; allow it at crate level.
+#![allow(clippy::double_must_use)]
 
 pub mod pb {
     pub mod common {
