@@ -103,146 +103,31 @@ async fn client(state: &AppState) -> ApiResult<BudgetServiceClient<Channel>> {
         .map_err(|e| map_status(Status::internal(e.to_string())))
 }
 
-fn with_user<T>(headers: &HeaderMap, req: T) -> ApiResult<GrpcRequest<T>> {
-    let auth = headers
-        .get("authorization")
-        .and_then(|v| v.to_str().ok())
-        .ok_or_else(|| map_status(Status::unauthenticated("Missing Authorization header")))?;
-
-    let mut grpc_req = GrpcRequest::new(req);
-    let value = MetadataValue::try_from(auth)
-        .map_err(|_| map_status(Status::unauthenticated("Invalid Authorization header")))?;
-    grpc_req.metadata_mut().insert("authorization", value);
+fn with_user<T>(state: &AppState, headers: &HeaderMap, req: T) -> ApiResult<GrpcRequest<T>> {
+    // SECURITY: the budget service trusts the `x-user-id` metadata and has no
+    // JWT verification of its own, so the gateway verifies the signature and
+    // expiry before forwarding the `sub` claim.
+    let mut grpc_req = crate::auth::request_with_user(&state.jwt_secret, headers, req)
+        .map_err(|e| map_status(Status::unauthenticated(e.message())))?;
 
     // Outbound: explicitly clear any inbound service-actor header from external clients.
     grpc_req.metadata_mut().remove("x-service-actor");
 
-    // Decode JWT payload to extract sub (user_id) and inject as x-user-id
-    if let Some(user_id) = extract_sub_from_bearer(auth) {
-        if let Ok(v) = MetadataValue::try_from(user_id.as_str()) {
-            grpc_req.metadata_mut().insert("x-user-id", v);
-        }
-    }
-
-    // Forward the user_type claim so downstream services can grant super_admin
-    // the Owner role without an explicit budget_members row (see
-    // budget/src/manager/biz/mod.rs `resolve_role`).
-    if let Some(user_type) = extract_user_type_from_bearer(auth) {
-        if let Ok(v) = MetadataValue::try_from(user_type.as_str()) {
-            grpc_req.metadata_mut().insert("x-user-type", v);
-        }
-        // Only the platform-known super-admin role may request service-actor
-        // escalation. The gateway never forwards an inbound x-service-actor
-        // header from the public HTTP surface.
-        if user_type == "super_admin" {
-            if let Ok(v) = MetadataValue::try_from("true") {
-                grpc_req.metadata_mut().insert("x-service-actor", v);
-            }
+    // Only the platform-known super-admin role may request service-actor
+    // escalation. The gateway never forwards an inbound x-service-actor
+    // header from the public HTTP surface.
+    let is_super_admin = grpc_req
+        .metadata()
+        .get("x-user-type")
+        .and_then(|v| v.to_str().ok())
+        == Some("super_admin");
+    if is_super_admin {
+        if let Ok(v) = MetadataValue::try_from("true") {
+            grpc_req.metadata_mut().insert("x-service-actor", v);
         }
     }
 
     Ok(grpc_req)
-}
-
-/// Extract `sub` claim from a Bearer JWT without signature verification.
-fn extract_sub_from_bearer(bearer: &str) -> Option<String> {
-    let token = bearer.strip_prefix("Bearer ")?;
-    let payload_b64 = token.split('.').nth(1)?;
-    let decoded = base64url_decode_jwt(payload_b64)?;
-    let claims: serde_json::Value = serde_json::from_slice(&decoded).ok()?;
-    claims
-        .get("sub")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string())
-}
-
-/// Extract `user_type` claim from a Bearer JWT without signature verification.
-/// The gateway already validated the signature upstream; this is a thin claim
-/// read used to inform downstream services (e.g. budget resolve_role grants
-/// super_admin Owner without an explicit budget_members row).
-fn extract_user_type_from_bearer(bearer: &str) -> Option<String> {
-    let token = bearer.strip_prefix("Bearer ")?;
-    let payload_b64 = token.split('.').nth(1)?;
-    let decoded = base64url_decode_jwt(payload_b64)?;
-    let claims: serde_json::Value = serde_json::from_slice(&decoded).ok()?;
-    claims
-        .get("user_type")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string())
-}
-
-fn base64url_decode_jwt(input: &str) -> Option<Vec<u8>> {
-    let mut s = input.replace('-', "+").replace('_', "/");
-    match s.len() % 4 {
-        2 => s.push_str("=="),
-        3 => s.push('='),
-        _ => {}
-    }
-    let bytes = s.as_bytes();
-    const T: [u8; 128] = {
-        let mut t = [0xffu8; 128];
-        let mut i = 0u8;
-        // A-Z = 0-25
-        while i < 26 {
-            t[(b'A' + i) as usize] = i;
-            i += 1;
-        }
-        i = 0;
-        // a-z = 26-51
-        while i < 26 {
-            t[(b'a' + i) as usize] = 26 + i;
-            i += 1;
-        }
-        i = 0;
-        // 0-9 = 52-61
-        while i < 10 {
-            t[(b'0' + i) as usize] = 52 + i;
-            i += 1;
-        }
-        t[b'+' as usize] = 62;
-        t[b'/' as usize] = 63;
-        t
-    };
-    let mut out = Vec::with_capacity(bytes.len() * 3 / 4);
-    let mut idx = 0;
-    while idx + 3 < bytes.len() {
-        let (b0, b1, b2, b3) = (
-            bytes[idx] as usize,
-            bytes[idx + 1] as usize,
-            bytes[idx + 2] as usize,
-            bytes[idx + 3] as usize,
-        );
-        if b0 >= 128 || b1 >= 128 {
-            return None;
-        }
-        let (v0, v1) = (T[b0], T[b1]);
-        if v0 == 0xff || v1 == 0xff {
-            return None;
-        }
-        out.push((v0 << 2) | (v1 >> 4));
-        if bytes[idx + 2] != b'=' {
-            if b2 >= 128 {
-                return None;
-            }
-            let v2 = T[b2];
-            if v2 == 0xff {
-                return None;
-            }
-            out.push((v1 << 4) | (v2 >> 2));
-            if bytes[idx + 3] != b'=' {
-                if b3 >= 128 {
-                    return None;
-                }
-                let v3 = T[b3];
-                if v3 == 0xff {
-                    return None;
-                }
-                out.push((v2 << 6) | v3);
-            }
-        }
-        idx += 4;
-    }
-    Some(out)
 }
 
 // ---------------------------------------------------------------------------
@@ -256,12 +141,19 @@ struct CreateBudgetRequest {
     budget_type: Option<serde_json::Value>, // accepts "standard" or 1
     currency: Option<String>,
     template_id: Option<String>,
+    period_start_day: Option<i32>,
+    timezone: Option<String>,
+    locale: Option<String>,
+    expected_income: Option<i64>,
 }
 
 #[derive(Deserialize)]
 struct UpdateBudgetRequest {
     name: Option<String>,
     budget_type: Option<serde_json::Value>, // accepts "standard" or 1
+    is_private: Option<bool>,
+    period_start_day: Option<i32>,
+    timezone: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -312,6 +204,7 @@ async fn create_budget(
     let mut c = client(&state).await?;
     let resp = c
         .create_budget(with_user(
+            &state,
             &headers,
             pb::CreateBudgetRequest {
                 org_id: body.org_id,
@@ -319,6 +212,10 @@ async fn create_budget(
                 budget_type: parse_budget_type(body.budget_type.as_ref()),
                 currency: body.currency.unwrap_or_else(|| "VND".to_string()),
                 template_id: body.template_id.unwrap_or_default(),
+                period_start_day: body.period_start_day,
+                timezone: body.timezone,
+                locale: body.locale.unwrap_or_default(),
+                expected_income: body.expected_income.unwrap_or(0),
             },
         )?)
         .await
@@ -341,7 +238,11 @@ async fn get_budget(
 ) -> ApiResult<Json<serde_json::Value>> {
     let mut c = client(&state).await?;
     let resp = c
-        .get_budget(with_user(&headers, pb::GetBudgetRequest { budget_id })?)
+        .get_budget(with_user(
+            &state,
+            &headers,
+            pb::GetBudgetRequest { budget_id },
+        )?)
         .await
         .map_err(map_status)?
         .into_inner();
@@ -358,6 +259,7 @@ async fn update_budget(
     // Fetch current to fill defaults
     let current = c
         .get_budget(with_user(
+            &state,
             &headers,
             pb::GetBudgetRequest {
                 budget_id: budget_id.clone(),
@@ -375,14 +277,22 @@ async fn update_budget(
     } else {
         current_budget.map(|b| b.budget_type).unwrap_or(1)
     };
+    let is_private = body
+        .is_private
+        .unwrap_or_else(|| current_budget.map(|b| b.is_private).unwrap_or(false));
     let resp = c
         .update_budget(with_user(
+            &state,
             &headers,
             pb::UpdateBudgetRequest {
                 budget_id,
                 name,
                 budget_type,
-                is_private: false, // TODO: wire is_private from request body (T1.1)
+                // Keep the stored flag unless the caller sends one; renaming a
+                // budget must not silently make it public again.
+                is_private,
+                period_start_day: body.period_start_day,
+                timezone: body.timezone,
             },
         )?)
         .await
@@ -397,9 +307,13 @@ async fn delete_budget(
     headers: HeaderMap,
 ) -> ApiResult<Json<serde_json::Value>> {
     let mut c = client(&state).await?;
-    c.delete_budget(with_user(&headers, pb::DeleteBudgetRequest { budget_id })?)
-        .await
-        .map_err(map_status)?;
+    c.delete_budget(with_user(
+        &state,
+        &headers,
+        pb::DeleteBudgetRequest { budget_id },
+    )?)
+    .await
+    .map_err(map_status)?;
     Ok(Json(
         serde_json::json!({"message": "Budget deleted successfully"}),
     ))
@@ -413,6 +327,7 @@ async fn force_close_budget(
     let mut c = client(&state).await?;
     let resp = c
         .force_close_budget(with_user(
+            &state,
             &headers,
             pb::ForceCloseBudgetRequest { budget_id },
         )?)
@@ -485,6 +400,7 @@ async fn list_budgets(
     let mut c = client(&state).await?;
     let resp = c
         .list_budgets(with_user(
+            &state,
             &headers,
             pb::ListBudgetsRequest {
                 org_id: params.org_id,
@@ -535,6 +451,7 @@ async fn list_budgets_admin(
     let mut c = client(&state).await?;
     let resp = c
         .list_budgets_admin(with_user(
+            &state,
             &headers,
             pb::ListBudgetsAdminRequest {
                 org_id: params.org_id.unwrap_or_default(),
@@ -563,6 +480,7 @@ async fn list_members(
     let mut c = client(&state).await?;
     let resp = c
         .list_budget_members(with_user(
+            &state,
             &headers,
             pb::ListBudgetMembersRequest { budget_id },
         )?)
@@ -582,6 +500,7 @@ async fn add_member(
     let mut c = client(&state).await?;
     let resp = c
         .add_budget_member(with_user(
+            &state,
             &headers,
             pb::AddBudgetMemberRequest {
                 budget_id,
@@ -608,6 +527,7 @@ async fn update_member_role(
     let mut c = client(&state).await?;
     let resp = c
         .update_budget_member_role(with_user(
+            &state,
             &headers,
             pb::UpdateBudgetMemberRoleRequest {
                 budget_id,
@@ -630,6 +550,7 @@ async fn remove_member(
 ) -> ApiResult<Json<serde_json::Value>> {
     let mut c = client(&state).await?;
     c.remove_budget_member(with_user(
+        &state,
         &headers,
         pb::RemoveBudgetMemberRequest { budget_id, user_id },
     )?)
@@ -649,6 +570,7 @@ async fn set_envelope_limit(
     let mut c = client(&state).await?;
     let resp = c
         .set_envelope_limit(with_user(
+            &state,
             &headers,
             pb::SetEnvelopeLimitRequest {
                 budget_id,
@@ -668,7 +590,11 @@ async fn get_burn_rate(
 ) -> ApiResult<Json<serde_json::Value>> {
     let mut c = client(&state).await?;
     let resp = c
-        .get_burn_rate(with_user(&headers, pb::GetBurnRateRequest { budget_id })?)
+        .get_burn_rate(with_user(
+            &state,
+            &headers,
+            pb::GetBurnRateRequest { budget_id },
+        )?)
         .await
         .map_err(map_status)?
         .into_inner();
@@ -684,6 +610,7 @@ async fn set_rollover_policy(
     let mut c = client(&state).await?;
     let resp = c
         .set_rollover_policy(with_user(
+            &state,
             &headers,
             pb::SetRolloverPolicyRequest {
                 budget_id,
@@ -704,6 +631,7 @@ async fn get_rollover_policy(
     let mut c = client(&state).await?;
     let resp = c
         .get_rollover_policy(with_user(
+            &state,
             &headers,
             pb::GetRolloverPolicyRequest { budget_id },
         )?)
@@ -719,7 +647,7 @@ async fn list_templates(
 ) -> ApiResult<Json<serde_json::Value>> {
     let mut c = client(&state).await?;
     let resp = c
-        .list_templates(with_user(&headers, pb::ListTemplatesRequest {})?)
+        .list_templates(with_user(&state, &headers, pb::ListTemplatesRequest {})?)
         .await
         .map_err(map_status)?
         .into_inner();
@@ -731,7 +659,7 @@ async fn list_templates(
                 "id": t.id,
                 "name": t.name,
                 "description": t.description,
-                "budget_type": t.budget_type,
+                "budget_type": budget_type_to_string(t.budget_type),
             })
         })
         .collect();
@@ -824,6 +752,7 @@ async fn create_invest_asset(
     let mut c = client(&state).await?;
     let resp = c
         .create_invest_asset(with_user(
+            &state,
             &headers,
             pb::CreateInvestAssetRequest {
                 budget_id,
@@ -860,6 +789,7 @@ async fn update_invest_asset(
     let mut c = client(&state).await?;
     let resp = c
         .update_invest_asset(with_user(
+            &state,
             &headers,
             pb::UpdateInvestAssetRequest {
                 asset_id,
@@ -887,6 +817,7 @@ async fn delete_invest_asset(
 ) -> ApiResult<Json<serde_json::Value>> {
     let mut c = client(&state).await?;
     c.delete_invest_asset(with_user(
+        &state,
         &headers,
         pb::DeleteInvestAssetRequest { asset_id },
     )?)
@@ -903,6 +834,7 @@ async fn list_invest_assets(
     let mut c = client(&state).await?;
     let resp = c
         .list_invest_assets(with_user(
+            &state,
             &headers,
             pb::ListInvestAssetsRequest { budget_id },
         )?)
@@ -921,6 +853,7 @@ async fn get_invest_portfolio_summary(
     let mut c = client(&state).await?;
     let resp = c
         .get_invest_portfolio_summary(with_user(
+            &state,
             &headers,
             pb::GetInvestPortfolioSummaryRequest { budget_id },
         )?)
@@ -946,6 +879,7 @@ async fn refresh_portfolio(
     let mut c = client(&state).await?;
     let resp = c
         .refresh_portfolio(with_user(
+            &state,
             &headers,
             pb::RefreshPortfolioRequest { budget_id },
         )?)
@@ -973,6 +907,7 @@ async fn add_price_snapshot(
     let mut c = client(&state).await?;
     let resp = c
         .add_price_snapshot(with_user(
+            &state,
             &headers,
             pb::AddPriceSnapshotRequest {
                 asset_id,
@@ -994,6 +929,7 @@ async fn get_latest_price_snapshot(
     let mut c = client(&state).await?;
     let resp = c
         .get_latest_price_snapshot(with_user(
+            &state,
             &headers,
             pb::GetLatestPriceSnapshotRequest { asset_id },
         )?)
@@ -1012,6 +948,7 @@ async fn list_price_snapshots(
     let mut c = client(&state).await?;
     let resp = c
         .list_price_snapshots(with_user(
+            &state,
             &headers,
             pb::ListPriceSnapshotsRequest {
                 asset_id,
@@ -1029,19 +966,50 @@ async fn list_price_snapshots(
 // Mappers
 // ---------------------------------------------------------------------------
 
+/// JSON label for a budget type.
+///
+/// The REST DTO layer must NOT emit the raw protobuf enum: serde serializes
+/// a prost enum by its Rust variant name ("Standard"), while the clients
+/// compare against the canonical lowercase labels ("standard").
+/// See `infra/.ai/skills/02-backend-rust/proto-enum-types.md`.
+fn budget_type_to_string(v: i32) -> &'static str {
+    match pb::BudgetType::try_from(v).unwrap_or(pb::BudgetType::Unspecified) {
+        pb::BudgetType::Standard => "standard",
+        pb::BudgetType::Saving => "saving",
+        pb::BudgetType::Debt => "debt",
+        pb::BudgetType::Invest => "invest",
+        pb::BudgetType::Sharing => "sharing",
+        pb::BudgetType::Unspecified => "standard",
+    }
+}
+
+/// JSON label for a budget role. See `budget_type_to_string`.
+fn budget_role_to_string(v: i32) -> &'static str {
+    match pb::BudgetRole::try_from(v).unwrap_or(pb::BudgetRole::Unspecified) {
+        pb::BudgetRole::Owner => "owner",
+        pb::BudgetRole::Manager => "manager",
+        pb::BudgetRole::Contributor => "contributor",
+        pb::BudgetRole::Viewer => "viewer",
+        pb::BudgetRole::Unspecified => "viewer",
+    }
+}
+
 fn map_budget(budget: Option<&pb::Budget>) -> serde_json::Value {
     budget.map_or(serde_json::Value::Null, |b| {
         serde_json::json!({
             "base":          map_base(b.base.as_ref()),
             "org_id":        b.org_id,
             "name":          b.name,
-            "budget_type":   b.budget_type,
+            "budget_type":   budget_type_to_string(b.budget_type),
             "currency":      b.currency,
-            "my_role":       b.my_role,
+            "my_role":       budget_role_to_string(b.my_role),
             "envelope_limit": b.envelope_limit,
             "current_spend":  b.current_spend,
             "burn_rate_pct":  b.burn_rate_pct,
             "member_count":   b.member_count,
+            "period_start_day": b.period_start_day,
+            "timezone":       b.timezone,
+            "status":         b.status,
         })
     })
 }

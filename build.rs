@@ -38,8 +38,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         format!("{}/protobuf/budget/budget.proto", proto_root),
         format!("{}/protobuf/category/category.proto", proto_root),
         format!("{}/protobuf/entry/entry.proto", proto_root),
+        format!("{}/protobuf/insight/insight.proto", proto_root),
         format!("{}/protobuf/sharing/sharing.proto", proto_root),
         format!("{}/protobuf/portfolio/portfolio.proto", proto_root),
+        format!("{}/protobuf/debt/debt.proto", proto_root),
         format!("{}/protobuf/shared/user/user.proto", proto_root),
         format!(
             "{}/protobuf/shared/organization/organization.proto",
@@ -49,6 +51,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         format!("{}/libs/protobuf/common/base.proto", libs_prefix),
     ];
     let file_refs: Vec<&str> = files.iter().map(String::as_str).collect();
+
+    // The proto sources live OUTSIDE this package (they are shared through the
+    // sibling `protobuf/` repo), so Cargo would not re-run this build script
+    // when they change and the generated code would silently go stale.
+    for f in &file_refs {
+        println!("cargo:rerun-if-changed={f}");
+    }
 
     tonic_build::configure()
         .build_server(true)
@@ -87,6 +96,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             ".service.portfolio.RecordStockDisposalRequest",
             "#[serde(default)]",
         )
+        // Debt messages carry no enums: every field may be omitted by the caller.
+        .type_attribute(".service.debt", "#[serde(default)]")
         .compile_protos(&file_refs, &include_refs)?;
     Ok(())
 }

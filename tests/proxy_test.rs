@@ -62,9 +62,11 @@ async fn spawn_proxy(monolith_addr: SocketAddr) -> SocketAddr {
         budget_grpc_url: "http://127.0.0.1:1".to_string(),
         portfolio_grpc_url: "http://127.0.0.1:1".to_string(),
         category_grpc_url: "http://127.0.0.1:1".to_string(),
+        insight_grpc_url: "http://127.0.0.1:1".to_string(),
         entry_grpc_url: "http://127.0.0.1:1".to_string(),
         sharing_grpc_url: "http://127.0.0.1:1".to_string(),
         identity_transport: IdentityTransport::ProxyHttp,
+        jwt_secret: "test-secret".to_string(),
     });
 
     let proxy_app = proxy::router().with_state(state);
@@ -184,9 +186,11 @@ async fn test_proxy_returns_bad_gateway_on_unreachable_upstream() {
         budget_grpc_url: "http://127.0.0.1:1".to_string(),
         portfolio_grpc_url: "http://127.0.0.1:1".to_string(),
         category_grpc_url: "http://127.0.0.1:1".to_string(),
+        insight_grpc_url: "http://127.0.0.1:1".to_string(),
         entry_grpc_url: "http://127.0.0.1:1".to_string(),
         sharing_grpc_url: "http://127.0.0.1:1".to_string(),
         identity_transport: IdentityTransport::ProxyHttp,
+        jwt_secret: "test-secret".to_string(),
     });
 
     let proxy_app = proxy::router().with_state(state);

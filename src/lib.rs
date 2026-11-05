@@ -1,5 +1,8 @@
 // tonic::Status is large; allow result_large_err across the crate
 #![allow(clippy::result_large_err)]
+// The double_must_use lint is raised by tonic/prost-generated code (include_proto!),
+// which we cannot edit; allow it at crate level.
+#![allow(clippy::double_must_use)]
 
 pub mod pb {
     pub mod common {
@@ -20,6 +23,9 @@ pub mod pb {
         pub mod category {
             tonic::include_proto!("service.category");
         }
+        pub mod insight {
+            tonic::include_proto!("service.insight");
+        }
         pub mod entry {
             tonic::include_proto!("service.entry");
         }
@@ -28,6 +34,9 @@ pub mod pb {
         }
         pub mod portfolio {
             tonic::include_proto!("service.portfolio");
+        }
+        pub mod debt {
+            tonic::include_proto!("service.debt");
         }
     }
     pub mod shared {
@@ -43,10 +52,13 @@ pub mod pb {
     }
 }
 
+pub mod auth;
 pub mod budget;
 pub mod category;
+pub mod debt;
 pub mod entry;
 pub mod identity;
+pub mod insight;
 pub mod media;
 pub mod middleware;
 pub mod portfolio;
@@ -95,9 +107,15 @@ pub struct AppState {
     pub portfolio_grpc_url: String,
     /// Category service gRPC endpoint.
     pub category_grpc_url: String,
+    /// Insight service gRPC endpoint.
+    pub insight_grpc_url: String,
     /// Entry service gRPC endpoint.
     pub entry_grpc_url: String,
     /// Sharing service gRPC endpoint.
     pub sharing_grpc_url: String,
     pub identity_transport: IdentityTransport,
+    /// HS256 secret shared with the identity service. The gateway verifies
+    /// every bearer token with it before forwarding the `sub` claim as
+    /// `x-user-id` — the downstream services trust that metadata.
+    pub jwt_secret: String,
 }

@@ -24,9 +24,13 @@ pub fn router() -> Router<Arc<AppState>> {
         )
         .route(
             "/expenses/{expense_id}",
-            get(get_expense).delete(delete_expense),
+            get(get_expense)
+                .patch(update_expense)
+                .delete(delete_expense),
         )
         .route("/budgets/{budget_id}/settlement", get(calculate_settlement))
+        .route("/budgets/{budget_id}/archive", post(archive_budget))
+        .route("/budgets/{budget_id}/reopen", post(reopen_budget))
         .route("/budgets/{budget_id}/join-link", post(generate_join_link))
         .route("/join-link/accept", post(accept_join_link))
         // --- Guest join ---
@@ -77,29 +81,37 @@ async fn client(state: &AppState) -> ApiResult<SharingServiceClient<Channel>> {
         .map_err(|e| map_status(Status::internal(e.to_string())))
 }
 
-fn with_user<T>(headers: &HeaderMap, req: T) -> ApiResult<GrpcRequest<T>> {
+fn with_user<T>(state: &AppState, headers: &HeaderMap, req: T) -> ApiResult<GrpcRequest<T>> {
     let auth = headers
         .get("authorization")
         .and_then(|v| v.to_str().ok())
         .ok_or_else(|| map_status(Status::unauthenticated("Missing Authorization header")))?;
+    // SECURITY: the sharing service authenticates the caller from the
+    // `x-user-id` metadata and has no JWT verification of its own. The
+    // gateway is therefore the only place the token signature can be
+    // checked — a forged `sub` must never reach the backend.
+    let claims = crate::auth::verify_bearer(auth, &state.jwt_secret)
+        .ok_or_else(|| map_status(Status::unauthenticated("Invalid or expired token")))?;
     let mut grpc_req = GrpcRequest::new(req);
     let value = MetadataValue::try_from(auth)
         .map_err(|_| map_status(Status::unauthenticated("Invalid Authorization header")))?;
     grpc_req.metadata_mut().insert("authorization", value);
-    if let Some(uid) = extract_sub(auth) {
-        if let Ok(v) = MetadataValue::try_from(uid.as_str()) {
-            grpc_req.metadata_mut().insert("x-user-id", v);
-        }
+    if let Ok(v) = MetadataValue::try_from(claims.user_id()) {
+        grpc_req.metadata_mut().insert("x-user-id", v);
     }
-    if let Some(ut) = extract_user_type(auth) {
-        if let Ok(v) = MetadataValue::try_from(ut.as_str()) {
+    if !claims.kind().is_empty() {
+        if let Ok(v) = MetadataValue::try_from(claims.kind()) {
             grpc_req.metadata_mut().insert("x-user-type", v);
         }
     }
     Ok(grpc_req)
 }
 
-fn with_user_or_guest<T>(headers: &HeaderMap, req: T) -> ApiResult<GrpcRequest<T>> {
+fn with_user_or_guest<T>(
+    state: &AppState,
+    headers: &HeaderMap,
+    req: T,
+) -> ApiResult<GrpcRequest<T>> {
     let mut grpc_req = GrpcRequest::new(req);
     let auth = match headers.get("authorization").and_then(|v| v.to_str().ok()) {
         Some(a) => a,
@@ -111,157 +123,29 @@ fn with_user_or_guest<T>(headers: &HeaderMap, req: T) -> ApiResult<GrpcRequest<T
         }
     };
     if auth.starts_with("SharingSession ") {
-        // Guest auth
+        // Guest auth — the session token is hashed and resolved by the
+        // sharing service itself, so there is no JWT to verify here.
         let token = auth.strip_prefix("SharingSession ").unwrap().trim();
         if let Ok(v) = MetadataValue::try_from(token) {
             grpc_req.metadata_mut().insert("x-session-token", v);
         }
     } else {
-        // Member JWT auth
+        // Member JWT auth — verify before trusting the `sub` claim.
+        let claims = crate::auth::verify_bearer(auth, &state.jwt_secret)
+            .ok_or_else(|| map_status(Status::unauthenticated("Invalid or expired token")))?;
         let value = MetadataValue::try_from(auth)
             .map_err(|_| map_status(Status::unauthenticated("Invalid Authorization header")))?;
         grpc_req.metadata_mut().insert("authorization", value);
-        if let Some(uid) = extract_sub(auth) {
-            if let Ok(v) = MetadataValue::try_from(uid.as_str()) {
-                grpc_req.metadata_mut().insert("x-user-id", v);
-            }
+        if let Ok(v) = MetadataValue::try_from(claims.user_id()) {
+            grpc_req.metadata_mut().insert("x-user-id", v);
         }
-        if let Some(ut) = extract_user_type(auth) {
-            if let Ok(v) = MetadataValue::try_from(ut.as_str()) {
+        if !claims.kind().is_empty() {
+            if let Ok(v) = MetadataValue::try_from(claims.kind()) {
                 grpc_req.metadata_mut().insert("x-user-type", v);
             }
         }
     }
     Ok(grpc_req)
-}
-
-/// Decode the `sub` claim from a JWT bearer token.
-///
-/// This is the gateway's ONLY source of `x-user-id` metadata for the
-/// sharing service — every authenticated-member request routes through
-/// here. The decoded `sub` is forwarded to the backend as the acting
-/// user_id, so a bug here directly compromises per-user authorization.
-///
-/// SECURITY NOTES
-/// - We do NOT verify the JWT signature in the gateway: the identity
-///   service is the source of truth and verifies the token on every
-///   request via the `authorization` metadata. This function only
-///   *reads* the unverified payload to forward the user id alongside
-///   the token, so a forged `sub` would be caught by the identity
-///   gRPC handler returning Unauthenticated before the sharing
-///   service ever sees the request.
-/// - We do NOT trust the `sub` value at face value in the gateway —
-///   the sharing service re-resolves it server-side.
-/// - `base64url_decode` below is shared by 4 other modules (category,
-///   entry, budget, middleware). Consolidating it is out of scope for
-///   this engagement; this copy is the security-sensitive one and
-///   is intentionally well-commented (Bug 4).
-fn extract_sub(bearer: &str) -> Option<String> {
-    let token = bearer.strip_prefix("Bearer ")?;
-    let payload = token.split('.').nth(1)?;
-    let decoded = base64url_decode(payload)?;
-    let claims: serde_json::Value = serde_json::from_slice(&decoded).ok()?;
-    claims
-        .get("sub")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string())
-}
-
-/// Extract `user_type` claim from a Bearer JWT without signature verification.
-/// See budget/mod.rs for the same pattern.
-fn extract_user_type(bearer: &str) -> Option<String> {
-    let token = bearer.strip_prefix("Bearer ")?;
-    let payload = token.split('.').nth(1)?;
-    let decoded = base64url_decode(payload)?;
-    let claims: serde_json::Value = serde_json::from_slice(&decoded).ok()?;
-    claims
-        .get("user_type")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string())
-}
-
-/// RFC 4648 §5 base64url decoder used by `extract_sub`.
-///
-/// This is a hand-rolled decoder. It is duplicated in
-/// `gateway/src/{category,entry,budget}/mod.rs` and
-/// `gateway/src/middleware/mod.rs` — a 5x duplication flagged in Bug 4.
-/// Full consolidation is out of scope; this copy stays as-is, but the
-/// intent is for a future `libs/crypto` or `libs/jwt` crate to own a
-/// single tested implementation. Until then, edits here must be
-/// mirrored in the other four locations.
-///
-/// Returns `None` on any malformed input (bad char, bad padding,
-/// truncated quartet). Does NOT allocate on failure beyond the
-/// fixed-size `T` lookup table.
-fn base64url_decode(input: &str) -> Option<Vec<u8>> {
-    let mut s = input.replace('-', "+").replace('_', "/");
-    match s.len() % 4 {
-        2 => s.push_str("=="),
-        3 => s.push('='),
-        _ => {}
-    }
-    let mut out = Vec::new();
-    let bytes = s.as_bytes();
-    const T: [u8; 128] = {
-        let mut t = [0xffu8; 128];
-        let mut i = 0u8;
-        while i < 26 {
-            t[(b'A' + i) as usize] = i;
-            i += 1;
-        }
-        i = 0;
-        while i < 26 {
-            t[(b'a' + i) as usize] = 26 + i;
-            i += 1;
-        }
-        i = 0;
-        while i < 10 {
-            t[(b'0' + i) as usize] = 52 + i;
-            i += 1;
-        }
-        t[b'+' as usize] = 62;
-        t[b'/' as usize] = 63;
-        t
-    };
-    let mut idx = 0;
-    while idx + 3 < bytes.len() {
-        let (b0, b1, b2, b3) = (
-            bytes[idx] as usize,
-            bytes[idx + 1] as usize,
-            bytes[idx + 2] as usize,
-            bytes[idx + 3] as usize,
-        );
-        if b0 >= 128 || b1 >= 128 {
-            return None;
-        }
-        let (v0, v1) = (T[b0], T[b1]);
-        if v0 == 0xff || v1 == 0xff {
-            return None;
-        }
-        out.push((v0 << 2) | (v1 >> 4));
-        if bytes[idx + 2] != b'=' {
-            if b2 >= 128 {
-                return None;
-            }
-            let v2 = T[b2];
-            if v2 == 0xff {
-                return None;
-            }
-            out.push((v1 << 4) | (v2 >> 2));
-            if bytes[idx + 3] != b'=' {
-                if b3 >= 128 {
-                    return None;
-                }
-                let v3 = T[b3];
-                if v3 == 0xff {
-                    return None;
-                }
-                out.push((v2 << 6) | v3);
-            }
-        }
-        idx += 4;
-    }
-    Some(out)
 }
 
 // ---------------------------------------------------------------------------
@@ -288,7 +172,6 @@ struct LegBody {
     user_id: String,
     amount: i64,
     #[serde(default)]
-    #[allow(dead_code)]
     weight: i64,
 }
 
@@ -353,39 +236,11 @@ async fn add_expense(
     Json(body): Json<AddExpenseRequest>,
 ) -> ApiResult<(StatusCode, Json<serde_json::Value>)> {
     let mut c = client(&state).await?;
-    let legs = body
-        .legs
-        .unwrap_or_default()
-        .into_iter()
-        .map(|l| pb::ExpenseLeg {
-            user_id: l.user_id,
-            amount: l.amount,
-            weight: 0,
-            share: 0,
-        })
-        .collect();
-    let items: Vec<pb::ExpenseItem> = body
-        .items
-        .into_iter()
-        .map(|it| pb::ExpenseItem {
-            id: String::new(),
-            expense_id: String::new(),
-            label: it.label,
-            amount: it.amount,
-            assignments: it
-                .assignments
-                .into_iter()
-                .map(|a| pb::ItemAssignment {
-                    user_id: a.user_id,
-                    numerator: a.numerator,
-                    resolved_amount: 0,
-                })
-                .collect(),
-        })
-        .collect();
+    let (legs, items) = build_legs_items(body.legs, body.items);
 
     let resp = c
         .add_expense(with_user_or_guest(
+            &state,
             &headers,
             pb::AddExpenseRequest {
                 budget_id,
@@ -406,6 +261,72 @@ async fn add_expense(
     Ok((StatusCode::CREATED, Json(map_expense(&resp))))
 }
 
+fn build_legs_items(
+    legs: Option<Vec<LegBody>>,
+    items: Vec<ItemBody>,
+) -> (Vec<pb::ExpenseLeg>, Vec<pb::ExpenseItem>) {
+    let legs = legs
+        .unwrap_or_default()
+        .into_iter()
+        .map(|l| pb::ExpenseLeg {
+            user_id: l.user_id,
+            amount: l.amount,
+            weight: l.weight,
+            share: 0,
+        })
+        .collect();
+    let items = items
+        .into_iter()
+        .map(|it| pb::ExpenseItem {
+            id: String::new(),
+            expense_id: String::new(),
+            label: it.label,
+            amount: it.amount,
+            assignments: it
+                .assignments
+                .into_iter()
+                .map(|a| pb::ItemAssignment {
+                    user_id: a.user_id,
+                    numerator: a.numerator,
+                    resolved_amount: 0,
+                })
+                .collect(),
+        })
+        .collect();
+    (legs, items)
+}
+
+async fn update_expense(
+    State(state): State<Arc<AppState>>,
+    Path(expense_id): Path<String>,
+    headers: HeaderMap,
+    Json(body): Json<AddExpenseRequest>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let mut c = client(&state).await?;
+    let (legs, items) = build_legs_items(body.legs, body.items);
+    let resp = c
+        .update_expense(with_user_or_guest(
+            &state,
+            &headers,
+            pb::UpdateExpenseRequest {
+                expense_id,
+                paid_by: body.paid_by,
+                total_amount: body.total_amount,
+                description: body.description.unwrap_or_default(),
+                expense_date: body.expense_date,
+                category_id: body.category_id.unwrap_or_default(),
+                split_method: body.split_method.unwrap_or(1),
+                legs,
+                items,
+                receipt_media_id: body.receipt_media_id.unwrap_or_default(),
+            },
+        )?)
+        .await
+        .map_err(map_status)?
+        .into_inner();
+    Ok(Json(map_expense(&resp)))
+}
+
 async fn get_expense(
     State(state): State<Arc<AppState>>,
     Path(expense_id): Path<String>,
@@ -414,6 +335,7 @@ async fn get_expense(
     let mut c = client(&state).await?;
     let resp = c
         .get_expense(with_user_or_guest(
+            &state,
             &headers,
             pb::GetExpenseRequest { expense_id },
         )?)
@@ -433,6 +355,7 @@ async fn list_expenses(
     let mut c = client(&state).await?;
     let resp = c
         .list_expenses(with_user_or_guest(
+            &state,
             &headers,
             pb::ListExpensesRequest { budget_id },
         )?)
@@ -450,6 +373,7 @@ async fn delete_expense(
 ) -> ApiResult<Json<serde_json::Value>> {
     let mut c = client(&state).await?;
     c.delete_expense(with_user_or_guest(
+        &state,
         &headers,
         pb::DeleteExpenseRequest { expense_id },
     )?)
@@ -466,6 +390,7 @@ async fn calculate_settlement(
     let mut c = client(&state).await?;
     let resp = c
         .calculate_settlement(with_user_or_guest(
+            &state,
             &headers,
             pb::CalculateSettlementRequest { budget_id },
         )?)
@@ -490,6 +415,42 @@ async fn calculate_settlement(
     ))
 }
 
+async fn archive_budget(
+    State(state): State<Arc<AppState>>,
+    Path(budget_id): Path<String>,
+    headers: HeaderMap,
+) -> ApiResult<Json<serde_json::Value>> {
+    let mut c = client(&state).await?;
+    let resp = c
+        .archive_sharing_budget(with_user(
+            &state,
+            &headers,
+            pb::SetSharingStatusRequest { budget_id },
+        )?)
+        .await
+        .map_err(map_status)?
+        .into_inner();
+    Ok(Json(serde_json::json!({ "status": resp.status })))
+}
+
+async fn reopen_budget(
+    State(state): State<Arc<AppState>>,
+    Path(budget_id): Path<String>,
+    headers: HeaderMap,
+) -> ApiResult<Json<serde_json::Value>> {
+    let mut c = client(&state).await?;
+    let resp = c
+        .reopen_sharing_budget(with_user(
+            &state,
+            &headers,
+            pb::SetSharingStatusRequest { budget_id },
+        )?)
+        .await
+        .map_err(map_status)?
+        .into_inner();
+    Ok(Json(serde_json::json!({ "status": resp.status })))
+}
+
 async fn generate_join_link(
     State(state): State<Arc<AppState>>,
     Path(budget_id): Path<String>,
@@ -498,6 +459,7 @@ async fn generate_join_link(
     let mut c = client(&state).await?;
     let resp = c
         .generate_join_link(with_user(
+            &state,
             &headers,
             pb::GenerateJoinLinkRequest { budget_id },
         )?)
@@ -522,19 +484,21 @@ async fn accept_join_link(
 ) -> ApiResult<Json<serde_json::Value>> {
     let mut c = client(&state).await?;
     // `accept_join_link` is the authenticated-member path: the caller must
-    // present a valid JWT. We need the `sub` claim to bind the new participant
-    // to the existing user. Reject malformed/missing tokens here rather than
-    // forwarding an empty `user_id` to the backend (Bug 1).
+    // present a valid JWT. We need the verified `sub` claim to bind the new
+    // participant to the existing user. The signature and expiry are checked
+    // here — an unverified `sub` would let anyone claim someone else's id.
     let user_id = headers
         .get("authorization")
         .and_then(|v| v.to_str().ok())
-        .and_then(extract_sub)
+        .and_then(|auth| crate::auth::verify_bearer(auth, &state.jwt_secret))
+        .map(|claims| claims.user_id().to_string())
         .ok_or_else(|| {
             map_status(Status::unauthenticated(
                 "Invalid or missing JWT for accept_join_link",
             ))
         })?;
     c.accept_join_link(with_user(
+        &state,
         &headers,
         pb::AcceptJoinLinkRequest {
             token: body.token,
@@ -612,6 +576,7 @@ async fn add_comment(
     let mut c = client(&state).await?;
     let resp = c
         .add_comment(with_user_or_guest(
+            &state,
             &headers,
             pb::AddCommentRequest {
                 expense_id,
@@ -634,6 +599,7 @@ async fn list_comments(
     let mut c = client(&state).await?;
     let resp = c
         .list_comments(with_user_or_guest(
+            &state,
             &headers,
             pb::ListCommentsRequest { expense_id },
         )?)
@@ -652,6 +618,7 @@ async fn delete_comment(
 ) -> ApiResult<Json<serde_json::Value>> {
     let mut c = client(&state).await?;
     c.delete_comment(with_user_or_guest(
+        &state,
         &headers,
         pb::DeleteCommentRequest { comment_id },
     )?)
@@ -673,6 +640,7 @@ async fn list_activity(
     let mut c = client(&state).await?;
     let resp = c
         .list_activity(with_user_or_guest(
+            &state,
             &headers,
             pb::ListActivityRequest {
                 budget_id,
@@ -719,6 +687,7 @@ async fn list_settlements(
     let mut c = client(&state).await?;
     let resp = c
         .list_settlements(with_user_or_guest(
+            &state,
             &headers,
             pb::ListSettlementsRequest { budget_id },
         )?)
@@ -761,6 +730,7 @@ async fn mark_settled(
     // (add_expense / add_comment) without re-reading the full §2.5 table.
     let resp = c
         .mark_settled(with_user_or_guest(
+            &state,
             &headers,
             pb::MarkSettledRequest {
                 budget_id,
@@ -794,6 +764,7 @@ async fn delete_settlement(
 ) -> ApiResult<Json<serde_json::Value>> {
     let mut c = client(&state).await?;
     c.delete_settlement(with_user(
+        &state,
         &headers,
         pb::DeleteSettlementRequest { confirmation_id },
     )?)
@@ -814,6 +785,7 @@ async fn list_participants(
     let mut c = client(&state).await?;
     let resp = c
         .list_participants(with_user_or_guest(
+            &state,
             &headers,
             pb::ListParticipantsRequest { budget_id },
         )?)
@@ -846,6 +818,7 @@ async fn revoke_participant(
 ) -> ApiResult<Json<serde_json::Value>> {
     let mut c = client(&state).await?;
     c.revoke_participant(with_user(
+        &state,
         &headers,
         pb::RevokeParticipantRequest {
             budget_id,
@@ -875,6 +848,7 @@ async fn transfer_ownership(
     let mut c = client(&state).await?;
     let resp = c
         .transfer_ownership(with_user(
+            &state,
             &headers,
             pb::TransferOwnershipRequest {
                 budget_id,
@@ -907,6 +881,7 @@ async fn update_member_role(
     let mut c = client(&state).await?;
     let resp = c
         .update_member_role(with_user(
+            &state,
             &headers,
             pb::UpdateMemberRoleRequest {
                 budget_id,
@@ -933,6 +908,7 @@ async fn leave_budget(
 ) -> ApiResult<Json<serde_json::Value>> {
     let mut c = client(&state).await?;
     c.leave_budget(with_user_or_guest(
+        &state,
         &headers,
         pb::LeaveBudgetRequest { budget_id },
     )?)
@@ -953,6 +929,7 @@ async fn get_balances(
     let mut c = client(&state).await?;
     let resp = c
         .get_balances(with_user_or_guest(
+            &state,
             &headers,
             pb::GetBalancesRequest { budget_id },
         )?)
@@ -978,6 +955,22 @@ async fn get_balances(
 // Mapper
 // ---------------------------------------------------------------------------
 
+/// JSON label for a split method.
+///
+/// The REST DTO layer must NOT emit the raw protobuf enum — serde emits the
+/// Rust variant name ("Equal"), while the clients compare against the
+/// canonical lowercase labels ("equal").
+fn split_method_to_string(v: i32) -> &'static str {
+    match pb::SplitMethod::try_from(v).unwrap_or(pb::SplitMethod::Unspecified) {
+        pb::SplitMethod::Equal => "equal",
+        pb::SplitMethod::Custom => "custom",
+        pb::SplitMethod::Weighted => "weighted",
+        pb::SplitMethod::Percentage => "percentage",
+        pb::SplitMethod::ByItem => "by_item",
+        pb::SplitMethod::Unspecified => "equal",
+    }
+}
+
 fn map_expense(e: &pb::Expense) -> serde_json::Value {
     let base = e.base.as_ref();
     serde_json::json!({
@@ -988,7 +981,7 @@ fn map_expense(e: &pb::Expense) -> serde_json::Value {
         "description":      e.description,
         "expense_date":     e.expense_date,
         "category_id":      e.category_id,
-        "split_method":     e.split_method,
+        "split_method":     split_method_to_string(e.split_method),
         "receipt_media_id": e.receipt_media_id,
         "legs": e.legs.iter().map(|l| serde_json::json!({
             "user_id": l.user_id,
