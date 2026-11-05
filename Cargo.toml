@@ -36,3 +36,4 @@ philand_configs = { package = "configs", path = "../libs/configs" }
 philand_storage = { package = "storage", path = "../libs/storage" }
 metrics-exporter-prometheus = "0.15"
 base64 = "0.22"
+jsonwebtoken = "9"

@@ -36,6 +36,8 @@ async fn main() -> anyhow::Result<()> {
         env::var("PORTFOLIO_GRPC_URL").unwrap_or_else(|_| budget_grpc_url.clone());
     let category_grpc_url =
         env::var("CATEGORY_GRPC_URL").unwrap_or_else(|_| "http://127.0.0.1:50104".to_string());
+    let insight_grpc_url =
+        env::var("INSIGHT_GRPC_URL").unwrap_or_else(|_| "http://127.0.0.1:50108".to_string());
     let entry_grpc_url =
         env::var("ENTRY_GRPC_URL").unwrap_or_else(|_| "http://127.0.0.1:50105".to_string());
     let sharing_grpc_url =
@@ -51,9 +53,11 @@ async fn main() -> anyhow::Result<()> {
         budget_grpc_url,
         portfolio_grpc_url,
         category_grpc_url,
+        insight_grpc_url,
         entry_grpc_url,
         sharing_grpc_url,
         identity_transport,
+        jwt_secret: config.jwt_secret,
     });
 
     let cors = CorsLayer::new()
@@ -68,13 +72,22 @@ async fn main() -> anyhow::Result<()> {
         IdentityTransport::GrpcTranscode => Router::new()
             .nest("/identity", gateway::identity::router())
             .nest("/media", gateway::media::router())
-            .nest("/budget", gateway::budget::router())
+            // Portfolio routes are also served under /budget: the web client addresses
+            // /api/budget/budgets/{id}/portfolio/... (kept alongside /portfolios).
+            .nest(
+                "/budget",
+                gateway::budget::router()
+                    .merge(gateway::portfolio::router())
+                    .merge(gateway::debt::router()),
+            )
             .nest("/category", gateway::category::router())
+            .nest("/insight", gateway::insight::router())
             .nest("/entry", gateway::entry::router())
             .nest("/sharing", gateway::sharing::router())
             .nest("/portfolios", gateway::portfolio::router()),
     }
-    .layer(middleware::from_fn(
+    .layer(middleware::from_fn_with_state(
+        state.clone(),
         gateway::middleware::reject_super_admin_on_user_paths,
     ));
 
