@@ -215,6 +215,53 @@ struct MarkSettledBody {
     note: Option<String>,
 }
 
+/// Query string for GET /sharing/budgets/:id/expenses. Every field is
+/// optional; with none of them the full list is returned, as before.
+#[derive(Deserialize, Default)]
+struct ListExpensesQuery {
+    q: Option<String>,
+    date_from: Option<String>,
+    date_to: Option<String>,
+    /// Comma-joined participant ids.
+    paid_by_ids: Option<String>,
+    share_participant_ids: Option<String>,
+    category_ids: Option<String>,
+    sort_by: Option<String>,
+    sort_dir: Option<String>,
+    page: Option<i32>,
+    page_size: Option<i32>,
+    scope: Option<String>,
+}
+
+fn split_ids(v: &Option<String>) -> Vec<String> {
+    v.as_deref()
+        .unwrap_or("")
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+impl ListExpensesQuery {
+    fn into_request(self, budget_id: String) -> pb::ListExpensesRequest {
+        pb::ListExpensesRequest {
+            budget_id,
+            paid_by_ids: split_ids(&self.paid_by_ids),
+            share_participant_ids: split_ids(&self.share_participant_ids),
+            category_ids: split_ids(&self.category_ids),
+            q: self.q,
+            date_from: self.date_from,
+            date_to: self.date_to,
+            sort_by: self.sort_by,
+            sort_dir: self.sort_dir,
+            page: self.page,
+            page_size: self.page_size,
+            scope: self.scope,
+        }
+    }
+}
+
 #[derive(Deserialize)]
 struct ActivityQuery {
     since: Option<i64>,
@@ -350,6 +397,7 @@ async fn get_expense(
 async fn list_expenses(
     State(state): State<Arc<AppState>>,
     Path(budget_id): Path<String>,
+    Query(q): Query<ListExpensesQuery>,
     headers: HeaderMap,
 ) -> ApiResult<Json<serde_json::Value>> {
     let mut c = client(&state).await?;
@@ -357,13 +405,23 @@ async fn list_expenses(
         .list_expenses(with_user_or_guest(
             &state,
             &headers,
-            pb::ListExpensesRequest { budget_id },
+            q.into_request(budget_id),
         )?)
         .await
         .map_err(map_status)?
         .into_inner();
     let expenses: Vec<serde_json::Value> = resp.expenses.iter().map(map_expense).collect();
-    Ok(Json(serde_json::json!({ "expenses": expenses })))
+    let mut body = serde_json::json!({ "expenses": expenses });
+    if let Some(m) = resp.meta.as_ref() {
+        body["meta"] = serde_json::json!({
+            "page": m.page,
+            "page_size": m.page_size,
+            "total_pages": m.total_pages,
+            "total_rows": m.total_rows,
+            "total_amount": m.total_amount,
+        });
+    }
+    Ok(Json(body))
 }
 
 async fn delete_expense(
@@ -1018,5 +1076,31 @@ fn map_comment(c: Option<&pb::ExpenseComment>) -> serde_json::Value {
             "deleted":               c.deleted,
         }),
         None => serde_json::json!({}),
+    }
+}
+
+#[cfg(test)]
+mod list_expenses_query_tests {
+    use super::*;
+
+    #[test]
+    fn empty_query_maps_to_an_unfiltered_request() {
+        let q: ListExpensesQuery = serde_urlencoded::from_str("").unwrap();
+        let r = q.into_request("b1".into());
+        assert_eq!(r.budget_id, "b1");
+        assert!(r.paid_by_ids.is_empty() && r.page_size.is_none() && r.q.is_none());
+    }
+
+    #[test]
+    fn comma_joined_ids_are_split_and_blanks_dropped() {
+        let q: ListExpensesQuery = serde_urlencoded::from_str(
+            "paid_by_ids=a,b,,%20c&share_participant_ids=x&page=2&page_size=30&sort_dir=asc",
+        )
+        .unwrap();
+        let r = q.into_request("b".into());
+        assert_eq!(r.paid_by_ids, vec!["a", "b", "c"]);
+        assert_eq!(r.share_participant_ids, vec!["x"]);
+        assert_eq!((r.page, r.page_size), (Some(2), Some(30)));
+        assert_eq!(r.sort_dir.as_deref(), Some("asc"));
     }
 }
