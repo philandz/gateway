@@ -156,6 +156,7 @@ struct ListEntriesQuery {
     page: Option<i32>,
     page_size: Option<i32>,
     budget_ids: Option<String>,
+    include_summary: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -274,6 +275,22 @@ async fn get_entry(
     )))
 }
 
+/// List body; `summary` is present only when the caller asked for it.
+fn list_body(
+    entries: Vec<serde_json::Value>,
+    meta: serde_json::Value,
+    summary: Option<&pb::ListSummary>,
+) -> serde_json::Value {
+    let mut body = serde_json::json!({"entries": entries, "meta": meta});
+    if let Some(s) = summary {
+        body["summary"] = serde_json::json!({
+            "count": s.count, "income": s.income, "expense": s.expense,
+            "transfer_in": s.transfer_in, "transfer_out": s.transfer_out,
+        });
+    }
+    body
+}
+
 async fn list_entries(
     State(state): State<Arc<AppState>>,
     Path(budget_id): Path<String>,
@@ -327,6 +344,7 @@ async fn list_entries(
         sort_dir: q.sort_dir,
         page: q.page,
         page_size: q.page_size,
+        include_summary: q.include_summary,
     };
     let resp = c
         .list_entries(with_user(
@@ -346,7 +364,7 @@ async fn list_entries(
         serde_json::json!({"page":1,"page_size":20,"total_pages":1,"total_rows":0}),
         |m| serde_json::json!({"page":m.page,"page_size":m.page_size,"total_pages":m.total_pages,"total_rows":m.total_rows}),
     );
-    Ok(Json(serde_json::json!({"entries": entries, "meta": meta})))
+    Ok(Json(list_body(entries, meta, resp.summary.as_ref())))
 }
 
 async fn list_all_entries(
@@ -409,6 +427,7 @@ async fn list_all_entries(
         sort_dir: q.sort_dir,
         page: q.page,
         page_size: q.page_size,
+        include_summary: q.include_summary,
     };
     let resp = c
         .list_entries(with_user(
@@ -428,7 +447,7 @@ async fn list_all_entries(
         serde_json::json!({"page":1,"page_size":20,"total_pages":1,"total_rows":0}),
         |m| serde_json::json!({"page":m.page,"page_size":m.page_size,"total_pages":m.total_pages,"total_rows":m.total_rows}),
     );
-    Ok(Json(serde_json::json!({"entries": entries, "meta": meta})))
+    Ok(Json(list_body(entries, meta, resp.summary.as_ref())))
 }
 
 async fn update_entry(
