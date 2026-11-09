@@ -169,3 +169,29 @@ fn both_category_id_and_category_ids_present() {
     assert!(q.category_ids.is_some());
     // Server is responsible for precedence (singular wins)
 }
+
+#[test]
+fn include_summary_flag_parses_and_defaults_off() {
+    let q: ListEntriesQuery = serde_urlencoded::from_str("include_summary=true").unwrap();
+    assert_eq!(q.include_summary, Some(true));
+    let q: ListEntriesQuery = serde_urlencoded::from_str("").unwrap();
+    assert_eq!(q.include_summary, None);
+}
+
+#[test]
+fn list_body_only_carries_summary_when_present() {
+    use crate::entry::list_body;
+    let meta = serde_json::json!({"page":1});
+    let none = list_body(vec![], meta.clone(), None);
+    assert!(none.get("summary").is_none());
+    let s = crate::entry::pb::ListSummary {
+        count: 3,
+        income: 10,
+        expense: 4,
+        transfer_in: 0,
+        transfer_out: 1,
+    };
+    let some = list_body(vec![], meta, Some(&s));
+    assert_eq!(some["summary"]["count"], 3);
+    assert_eq!(some["summary"]["transfer_out"], 1);
+}
