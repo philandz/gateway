@@ -97,6 +97,12 @@ pub struct ListQuery {
     #[serde(default)]
     pub page_size: Option<i32>,
     #[serde(default)]
+    pub date_from: Option<String>,
+    #[serde(default)]
+    pub date_to: Option<String>,
+    #[serde(default)]
+    pub kind: Option<String>,
+    #[serde(default)]
     pub max_rows: Option<i32>,
 }
 
@@ -392,6 +398,9 @@ async fn list_payments(
             account_id: q.account_id.unwrap_or_default(),
             page: q.page.unwrap_or(0),
             page_size: q.page_size.unwrap_or(0),
+            date_from: q.date_from.filter(|v| !v.is_empty()),
+            date_to: q.date_to.filter(|v| !v.is_empty()),
+            kind: q.kind.filter(|v| !v.is_empty()),
         },
     )?;
     Ok(Json(
@@ -422,4 +431,21 @@ async fn list_events(
     Ok(Json(
         c.list_debt_events(req).await.map_err(api_err)?.into_inner(),
     ))
+}
+
+#[cfg(test)]
+mod payment_filter_query_tests {
+    use super::ListQuery;
+
+    #[test]
+    fn payment_filters_parse_and_default_to_none() {
+        let q: ListQuery = serde_urlencoded::from_str(
+            "account_id=a&page=1&page_size=20&date_from=2026-01-01&date_to=2026-03-31&kind=prepayment",
+        )
+        .unwrap();
+        assert_eq!(q.date_from.as_deref(), Some("2026-01-01"));
+        assert_eq!(q.kind.as_deref(), Some("prepayment"));
+        let bare: ListQuery = serde_urlencoded::from_str("").unwrap();
+        assert!(bare.date_from.is_none() && bare.date_to.is_none() && bare.kind.is_none());
+    }
 }
