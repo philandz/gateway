@@ -38,6 +38,9 @@ pub mod pb {
         pub mod debt {
             tonic::include_proto!("service.debt");
         }
+        pub mod notification {
+            tonic::include_proto!("service.notification");
+        }
     }
     pub mod shared {
         pub mod user {
@@ -61,6 +64,7 @@ pub mod identity;
 pub mod insight;
 pub mod media;
 pub mod middleware;
+pub mod notification;
 pub mod portfolio;
 pub mod proxy;
 pub mod sharing;
@@ -113,6 +117,8 @@ pub struct AppState {
     pub entry_grpc_url: String,
     /// Sharing service gRPC endpoint.
     pub sharing_grpc_url: String,
+    /// Notification service gRPC endpoint.
+    pub notification_grpc_url: String,
     pub identity_transport: IdentityTransport,
     /// HS256 secret shared with the identity service. The gateway verifies
     /// every bearer token with it before forwarding the `sub` claim as

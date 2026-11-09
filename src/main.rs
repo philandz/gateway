@@ -43,6 +43,9 @@ async fn main() -> anyhow::Result<()> {
     let sharing_grpc_url =
         env::var("SHARING_GRPC_URL").unwrap_or_else(|_| "http://127.0.0.1:50106".to_string());
 
+    let notification_grpc_url =
+        env::var("NOTIFICATION_GRPC_URL").unwrap_or_else(|_| "http://127.0.0.1:50109".to_string());
+
     let state = Arc::new(AppState {
         client: Client::new(),
         monolith_url: config.upstream_url,
@@ -56,6 +59,7 @@ async fn main() -> anyhow::Result<()> {
         insight_grpc_url,
         entry_grpc_url,
         sharing_grpc_url,
+        notification_grpc_url,
         identity_transport,
         jwt_secret: config.jwt_secret,
     });
@@ -84,6 +88,8 @@ async fn main() -> anyhow::Result<()> {
             .nest("/insight", gateway::insight::router())
             .nest("/entry", gateway::entry::router())
             .nest("/sharing", gateway::sharing::router())
+            .nest("/notification", gateway::notification::router())
+            .nest("/admin/notification", gateway::notification::admin_router())
             .nest("/portfolios", gateway::portfolio::router()),
     }
     .layer(middleware::from_fn_with_state(
