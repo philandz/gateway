@@ -184,13 +184,16 @@ async fn app() -> (axum::Router, Seen) {
     // Same shape as main.rs: user + admin routers behind the super-admin guard.
     let api = axum::Router::new()
         .nest("/notification", gateway::notification::router())
-        .nest("/admin/notification", gateway::notification::admin_router())
-        .layer(axum::middleware::from_fn_with_state(
-            state.clone(),
-            gateway::middleware::reject_super_admin_on_user_paths,
-        ));
+        .nest("/admin/notification", gateway::notification::admin_router());
+    // The guard must wrap the outer router: inside `.nest("/api")` the prefix is stripped.
     (
-        axum::Router::new().nest("/api", api).with_state(state),
+        axum::Router::new()
+            .nest("/api", api)
+            .layer(axum::middleware::from_fn_with_state(
+                state.clone(),
+                gateway::middleware::reject_super_admin_on_user_paths,
+            ))
+            .with_state(state),
         seen,
     )
 }
@@ -271,6 +274,15 @@ async fn super_admin_can_use_the_admin_path() {
         seen.lock()[0],
         ("super_admin".to_string(), "admin_list".to_string())
     );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn super_admin_is_rejected_on_user_inbox() {
+    let (app, seen) = app().await;
+    let (s, body) = get(&app, "/api/notification/inbox", Some(&jwt("super_admin"))).await;
+    assert_eq!(s, 403);
+    assert_eq!(body["code"], "FORBIDDEN");
+    assert!(seen.lock().is_empty(), "request must not reach the service");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

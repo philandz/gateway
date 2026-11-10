@@ -91,11 +91,7 @@ async fn main() -> anyhow::Result<()> {
             .nest("/notification", gateway::notification::router())
             .nest("/admin/notification", gateway::notification::admin_router())
             .nest("/portfolios", gateway::portfolio::router()),
-    }
-    .layer(middleware::from_fn_with_state(
-        state.clone(),
-        gateway::middleware::reject_super_admin_on_user_paths,
-    ));
+    };
 
     let is_local_docs = is_localhost_binding(&config.host);
     let swagger_router = if is_local_docs {
@@ -122,6 +118,12 @@ async fn main() -> anyhow::Result<()> {
             get(move || async move { metrics_handle.render() }),
         )
         .nest("/api", api_router)
+        // Applied on the outer router: inside `.nest("/api")` the `/api` prefix is stripped, so the
+        // guard would never see an `/api/...` path and silently let super admins through.
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            gateway::middleware::reject_super_admin_on_user_paths,
+        ))
         .merge(swagger_router)
         .layer(TraceLayer::new_for_http())
         .layer(cors)
