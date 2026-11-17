@@ -125,3 +125,38 @@ pub struct AppState {
     /// `x-user-id` — the downstream services trust that metadata.
     pub jwt_secret: String,
 }
+
+/// Routes mounted under `/api`, selected by the identity transport.
+///
+/// Kept in the library (not `main`) so tests exercise the exact router that
+/// production serves. `/public/*` must be reachable here as well as at the
+/// outer root: Traefik forwards `/api/public/...` untouched, and axum strips
+/// `/api` before this router sees the request.
+pub fn api_router(transport: IdentityTransport) -> axum::Router<std::sync::Arc<AppState>> {
+    use axum::routing::any;
+    use axum::Router;
+
+    match transport {
+        IdentityTransport::ProxyHttp => proxy::router_with_identity(),
+        IdentityTransport::GrpcTranscode => Router::new()
+            // Public static objects (e.g. the login hero video) live in media storage.
+            .route("/public/{*path}", any(proxy::media_public_proxy_handler))
+            .nest("/identity", identity::router())
+            .nest("/media", media::router())
+            // Portfolio routes are also served under /budget: the web client addresses
+            // /api/budget/budgets/{id}/portfolio/... (kept alongside /portfolios).
+            .nest(
+                "/budget",
+                budget::router()
+                    .merge(portfolio::router())
+                    .merge(debt::router()),
+            )
+            .nest("/category", category::router())
+            .nest("/insight", insight::router())
+            .nest("/entry", entry::router())
+            .nest("/sharing", sharing::router())
+            .nest("/notification", notification::router())
+            .nest("/admin/notification", notification::admin_router())
+            .nest("/portfolios", portfolio::router()),
+    }
+}

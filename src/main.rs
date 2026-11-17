@@ -71,27 +71,7 @@ async fn main() -> anyhow::Result<()> {
 
     let x_request_id = axum::http::HeaderName::from_static("x-request-id");
 
-    let api_router = match identity_transport {
-        IdentityTransport::ProxyHttp => gateway::proxy::router_with_identity(),
-        IdentityTransport::GrpcTranscode => Router::new()
-            .nest("/identity", gateway::identity::router())
-            .nest("/media", gateway::media::router())
-            // Portfolio routes are also served under /budget: the web client addresses
-            // /api/budget/budgets/{id}/portfolio/... (kept alongside /portfolios).
-            .nest(
-                "/budget",
-                gateway::budget::router()
-                    .merge(gateway::portfolio::router())
-                    .merge(gateway::debt::router()),
-            )
-            .nest("/category", gateway::category::router())
-            .nest("/insight", gateway::insight::router())
-            .nest("/entry", gateway::entry::router())
-            .nest("/sharing", gateway::sharing::router())
-            .nest("/notification", gateway::notification::router())
-            .nest("/admin/notification", gateway::notification::admin_router())
-            .nest("/portfolios", gateway::portfolio::router()),
-    };
+    let api_router = gateway::api_router(identity_transport);
 
     let is_local_docs = is_localhost_binding(&config.host);
     let swagger_router = if is_local_docs {
