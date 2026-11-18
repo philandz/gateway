@@ -143,6 +143,18 @@ impl NotificationService for Fake {
             total: 1,
         }))
     }
+    async fn unsubscribe_email(
+        &self,
+        request: Request<pb::UnsubscribeEmailRequest>,
+    ) -> Result<Response<pb::UnsubscribeEmailResponse>, Status> {
+        if request.into_inner().token == "good" {
+            Ok(Response::new(pb::UnsubscribeEmailResponse {
+                category: "reminder".into(),
+            }))
+        } else {
+            Err(Status::invalid_argument("invalid or expired link"))
+        }
+    }
     async fn publish(
         &self,
         _: Request<pb::PublishRequest>,
@@ -283,6 +295,63 @@ async fn super_admin_is_rejected_on_user_inbox() {
     assert_eq!(s, 403);
     assert_eq!(body["code"], "FORBIDDEN");
     assert!(seen.lock().is_empty(), "request must not reach the service");
+}
+
+async fn text(app: &axum::Router, method: &str, uri: &str, form: Option<&str>) -> (u16, String) {
+    use axum::body::Body;
+    use axum::http::{header, Request as H};
+    use tower::ServiceExt;
+    let mut b = H::builder().method(method).uri(uri);
+    let body = match form {
+        Some(f) => {
+            b = b.header(header::CONTENT_TYPE, "application/x-www-form-urlencoded");
+            Body::from(f.to_string())
+        }
+        None => Body::empty(),
+    };
+    let resp = app.clone().oneshot(b.body(body).unwrap()).await.unwrap();
+    let status = resp.status().as_u16();
+    let bytes = axum::body::to_bytes(resp.into_body(), 1 << 20)
+        .await
+        .unwrap();
+    (status, String::from_utf8_lossy(&bytes).into_owned())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn unsubscribe_is_public_and_only_a_post_changes_anything() {
+    let (app, seen) = app().await;
+    // GET only shows the confirmation form (escaped), without calling the service.
+    let (s, html) = text(
+        &app,
+        "GET",
+        "/api/notification/unsubscribe?token=good%22%3E",
+        None,
+    )
+    .await;
+    assert_eq!(s, 200);
+    assert!(html.contains("<form"));
+    assert!(!html.contains("good\"><"));
+    // POST with a valid token succeeds without any Authorization header.
+    let (s, html) = text(
+        &app,
+        "POST",
+        "/api/notification/unsubscribe",
+        Some("token=good"),
+    )
+    .await;
+    assert_eq!(s, 200);
+    assert!(html.contains("Done"));
+    // A bad token is a 400 page, not a server error.
+    let (s, html) = text(
+        &app,
+        "POST",
+        "/api/notification/unsubscribe",
+        Some("token=bad"),
+    )
+    .await;
+    assert_eq!(s, 400);
+    assert!(html.contains("Invalid link"));
+    assert!(seen.lock().is_empty());
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

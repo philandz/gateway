@@ -36,6 +36,11 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/banners", get(list_banners))
         .route("/preferences", get(get_preferences).put(update_preferences))
         .route("/budgets/{budget_id}/mute", put(set_budget_mute))
+        // Public (no JWT): the signed token in an email is the credential.
+        .route(
+            "/unsubscribe",
+            get(unsubscribe_page).post(unsubscribe_submit),
+        )
 }
 
 pub fn admin_router() -> Router<Arc<AppState>> {
@@ -56,6 +61,80 @@ pub fn admin_router() -> Router<Arc<AppState>> {
             "/broadcasts/{broadcast_id}/archive",
             post(admin_archive_broadcast),
         )
+}
+
+// ---------------------------------------------------------------------------
+// public: email unsubscribe
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+struct UnsubscribeParams {
+    #[serde(default)]
+    token: String,
+}
+
+fn page(body: &str) -> axum::response::Html<String> {
+    axum::response::Html(format!(
+        "<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" \
+         content=\"width=device-width,initial-scale=1\"><title>Philandz</title></head>\
+         <body style=\"font-family:Arial,Helvetica,sans-serif;max-width:480px;margin:48px auto;\
+         padding:0 16px;color:#111\">{body}</body></html>"
+    ))
+}
+
+fn html_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#39;")
+}
+
+/// GET only shows a confirmation button: link scanners that prefetch emails must not be able to
+/// unsubscribe anyone.
+async fn unsubscribe_page(Query(q): Query<UnsubscribeParams>) -> axum::response::Html<String> {
+    page(&format!(
+        "<h2>Ngừng nhận email? / Stop these emails?</h2>\
+         <p>Bạn sẽ không nhận email thuộc loại thông báo này nữa. Thông báo trong ứng dụng không đổi.</p>\
+         <p>You will stop receiving emails of this kind. In-app notifications are unchanged.</p>\
+         <form method=\"post\" action=\"\"><input type=\"hidden\" name=\"token\" value=\"{}\">\
+         <button type=\"submit\" style=\"padding:10px 18px;border-radius:6px;border:0;\
+         background:#0f766e;color:#fff;font-size:16px\">Xác nhận / Confirm</button></form>",
+        html_escape(&q.token)
+    ))
+}
+
+async fn unsubscribe_submit(
+    State(state): State<Arc<AppState>>,
+    axum::Form(form): axum::Form<UnsubscribeParams>,
+) -> (StatusCode, axum::response::Html<String>) {
+    let result = async {
+        let mut c = client(&state).await.map_err(|_| ())?;
+        c.unsubscribe_email(GrpcRequest::new(pb::UnsubscribeEmailRequest {
+            token: form.token,
+        }))
+        .await
+        .map_err(|_| ())
+    }
+    .await;
+    match result {
+        Ok(_) => (
+            StatusCode::OK,
+            page(
+                "<h2>Đã xong / Done</h2>\
+                 <p>Bạn sẽ không còn nhận email loại này. Bạn có thể bật lại trong Cài đặt thông báo.</p>\
+                 <p>You will no longer get these emails. You can turn them back on in Notification settings.</p>",
+            ),
+        ),
+        Err(()) => (
+            StatusCode::BAD_REQUEST,
+            page(
+                "<h2>Liên kết không hợp lệ / Invalid link</h2>\
+                 <p>Liên kết đã hết hạn hoặc không đúng. Hãy đổi trong Cài đặt thông báo.</p>\
+                 <p>This link is invalid or expired. Please change it in Notification settings.</p>",
+            ),
+        ),
+    }
 }
 
 // ---------------------------------------------------------------------------
