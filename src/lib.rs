@@ -38,6 +38,9 @@ pub mod pb {
         pub mod debt {
             tonic::include_proto!("service.debt");
         }
+        pub mod notification {
+            tonic::include_proto!("service.notification");
+        }
     }
     pub mod shared {
         pub mod user {
@@ -61,6 +64,7 @@ pub mod identity;
 pub mod insight;
 pub mod media;
 pub mod middleware;
+pub mod notification;
 pub mod portfolio;
 pub mod proxy;
 pub mod sharing;
@@ -113,9 +117,46 @@ pub struct AppState {
     pub entry_grpc_url: String,
     /// Sharing service gRPC endpoint.
     pub sharing_grpc_url: String,
+    /// Notification service gRPC endpoint.
+    pub notification_grpc_url: String,
     pub identity_transport: IdentityTransport,
     /// HS256 secret shared with the identity service. The gateway verifies
     /// every bearer token with it before forwarding the `sub` claim as
     /// `x-user-id` — the downstream services trust that metadata.
     pub jwt_secret: String,
+}
+
+/// Routes mounted under `/api`, selected by the identity transport.
+///
+/// Kept in the library (not `main`) so tests exercise the exact router that
+/// production serves. `/public/*` must be reachable here as well as at the
+/// outer root: Traefik forwards `/api/public/...` untouched, and axum strips
+/// `/api` before this router sees the request.
+pub fn api_router(transport: IdentityTransport) -> axum::Router<std::sync::Arc<AppState>> {
+    use axum::routing::any;
+    use axum::Router;
+
+    match transport {
+        IdentityTransport::ProxyHttp => proxy::router_with_identity(),
+        IdentityTransport::GrpcTranscode => Router::new()
+            // Public static objects (e.g. the login hero video) live in media storage.
+            .route("/public/{*path}", any(proxy::media_public_proxy_handler))
+            .nest("/identity", identity::router())
+            .nest("/media", media::router())
+            // Portfolio routes are also served under /budget: the web client addresses
+            // /api/budget/budgets/{id}/portfolio/... (kept alongside /portfolios).
+            .nest(
+                "/budget",
+                budget::router()
+                    .merge(portfolio::router())
+                    .merge(debt::router()),
+            )
+            .nest("/category", category::router())
+            .nest("/insight", insight::router())
+            .nest("/entry", entry::router())
+            .nest("/sharing", sharing::router())
+            .nest("/notification", notification::router())
+            .nest("/admin/notification", notification::admin_router())
+            .nest("/portfolios", portfolio::router()),
+    }
 }

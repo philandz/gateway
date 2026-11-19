@@ -43,6 +43,9 @@ async fn main() -> anyhow::Result<()> {
     let sharing_grpc_url =
         env::var("SHARING_GRPC_URL").unwrap_or_else(|_| "http://127.0.0.1:50106".to_string());
 
+    let notification_grpc_url =
+        env::var("NOTIFICATION_GRPC_URL").unwrap_or_else(|_| "http://127.0.0.1:50109".to_string());
+
     let state = Arc::new(AppState {
         client: Client::new(),
         monolith_url: config.upstream_url,
@@ -56,6 +59,7 @@ async fn main() -> anyhow::Result<()> {
         insight_grpc_url,
         entry_grpc_url,
         sharing_grpc_url,
+        notification_grpc_url,
         identity_transport,
         jwt_secret: config.jwt_secret,
     });
@@ -67,29 +71,7 @@ async fn main() -> anyhow::Result<()> {
 
     let x_request_id = axum::http::HeaderName::from_static("x-request-id");
 
-    let api_router = match identity_transport {
-        IdentityTransport::ProxyHttp => gateway::proxy::router_with_identity(),
-        IdentityTransport::GrpcTranscode => Router::new()
-            .nest("/identity", gateway::identity::router())
-            .nest("/media", gateway::media::router())
-            // Portfolio routes are also served under /budget: the web client addresses
-            // /api/budget/budgets/{id}/portfolio/... (kept alongside /portfolios).
-            .nest(
-                "/budget",
-                gateway::budget::router()
-                    .merge(gateway::portfolio::router())
-                    .merge(gateway::debt::router()),
-            )
-            .nest("/category", gateway::category::router())
-            .nest("/insight", gateway::insight::router())
-            .nest("/entry", gateway::entry::router())
-            .nest("/sharing", gateway::sharing::router())
-            .nest("/portfolios", gateway::portfolio::router()),
-    }
-    .layer(middleware::from_fn_with_state(
-        state.clone(),
-        gateway::middleware::reject_super_admin_on_user_paths,
-    ));
+    let api_router = gateway::api_router(identity_transport);
 
     let is_local_docs = is_localhost_binding(&config.host);
     let swagger_router = if is_local_docs {
@@ -116,6 +98,12 @@ async fn main() -> anyhow::Result<()> {
             get(move || async move { metrics_handle.render() }),
         )
         .nest("/api", api_router)
+        // Applied on the outer router: inside `.nest("/api")` the `/api` prefix is stripped, so the
+        // guard would never see an `/api/...` path and silently let super admins through.
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            gateway::middleware::reject_super_admin_on_user_paths,
+        ))
         .merge(swagger_router)
         .layer(TraceLayer::new_for_http())
         .layer(cors)

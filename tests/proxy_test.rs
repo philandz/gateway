@@ -65,6 +65,7 @@ async fn spawn_proxy(monolith_addr: SocketAddr) -> SocketAddr {
         insight_grpc_url: "http://127.0.0.1:1".to_string(),
         entry_grpc_url: "http://127.0.0.1:1".to_string(),
         sharing_grpc_url: "http://127.0.0.1:1".to_string(),
+        notification_grpc_url: "http://127.0.0.1:1".to_string(),
         identity_transport: IdentityTransport::ProxyHttp,
         jwt_secret: "test-secret".to_string(),
     });
@@ -189,6 +190,7 @@ async fn test_proxy_returns_bad_gateway_on_unreachable_upstream() {
         insight_grpc_url: "http://127.0.0.1:1".to_string(),
         entry_grpc_url: "http://127.0.0.1:1".to_string(),
         sharing_grpc_url: "http://127.0.0.1:1".to_string(),
+        notification_grpc_url: "http://127.0.0.1:1".to_string(),
         identity_transport: IdentityTransport::ProxyHttp,
         jwt_secret: "test-secret".to_string(),
     });

@@ -295,6 +295,7 @@ async fn forged_super_admin_jwt_is_rejected() {
         insight_grpc_url: "http://127.0.0.1:1".to_string(),
         entry_grpc_url: "http://127.0.0.1:1".to_string(),
         sharing_grpc_url: "http://127.0.0.1:1".to_string(),
+        notification_grpc_url: "http://127.0.0.1:1".to_string(),
         identity_transport: gateway::IdentityTransport::GrpcTranscode,
         jwt_secret: TEST_SECRET.to_string(),
     });
@@ -358,6 +359,7 @@ async fn super_admin_jwt_passes_through_gateway_with_user_type_metadata() {
         insight_grpc_url: "http://127.0.0.1:1".to_string(),
         entry_grpc_url: "http://127.0.0.1:1".to_string(),
         sharing_grpc_url: "http://127.0.0.1:1".to_string(),
+        notification_grpc_url: "http://127.0.0.1:1".to_string(),
         identity_transport: gateway::IdentityTransport::GrpcTranscode,
         jwt_secret: TEST_SECRET.to_string(),
     });
