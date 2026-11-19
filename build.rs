@@ -42,6 +42,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         format!("{}/protobuf/sharing/sharing.proto", proto_root),
         format!("{}/protobuf/portfolio/portfolio.proto", proto_root),
         format!("{}/protobuf/debt/debt.proto", proto_root),
+        format!("{}/protobuf/notification/notification.proto", proto_root),
         format!("{}/protobuf/shared/user/user.proto", proto_root),
         format!(
             "{}/protobuf/shared/organization/organization.proto",
