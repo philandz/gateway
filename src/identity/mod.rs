@@ -43,6 +43,11 @@ pub fn router() -> Router<Arc<AppState>> {
             get(list_org_invitations_proxy).post(invite_member),
         )
         .route("/invitations/{token}/accept", post(accept_invitation))
+        .route("/me/invitations", get(list_my_invitations_proxy))
+        .route(
+            "/me/invitations/{invitation_id}/{action}",
+            post(answer_my_invitation_proxy),
+        )
         .route(
             "/organizations/{org_id}/members/{user_id}/role",
             patch(change_org_member_role),
@@ -843,6 +848,47 @@ async fn list_org_invitations_proxy(
     proxy_request(&state, &headers, &uri).await
 }
 
+async fn list_my_invitations_proxy(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> ApiResult<Response> {
+    let uri = format!("{}/me/invitations", state.identity_url);
+    proxy_request(&state, &headers, &uri).await
+}
+
+/// `action` is `accept` or `decline`; anything else is a 404 like any unknown route.
+async fn answer_my_invitation_proxy(
+    State(state): State<Arc<AppState>>,
+    Path((invitation_id, action)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> ApiResult<Response> {
+    if action != "accept" && action != "decline" {
+        return Err((
+            StatusCode::NOT_FOUND,
+            Json(ErrorResponse {
+                code: "not_found".to_string(),
+                message: "Not found".to_string(),
+                details: vec![],
+            }),
+        ));
+    }
+    let uri = format!(
+        "{}/me/invitations/{}/{}",
+        state.identity_url,
+        urlencoding_path(&invitation_id),
+        action
+    );
+    proxy_request_with(&state, &headers, &uri, axum::http::Method::POST).await
+}
+
+/// Keeps a path segment from smuggling extra segments or a query into the upstream URL.
+fn urlencoding_path(segment: &str) -> String {
+    segment
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '-')
+        .collect()
+}
+
 async fn accept_invitation(
     State(state): State<Arc<AppState>>,
     Path(token): Path<String>,
@@ -1138,7 +1184,16 @@ async fn proxy_request(
     headers: &HeaderMap,
     uri: &str,
 ) -> ApiResult<Response> {
-    let mut proxy_req = state.client.request(axum::http::Method::GET, uri);
+    proxy_request_with(state, headers, uri, axum::http::Method::GET).await
+}
+
+async fn proxy_request_with(
+    state: &Arc<AppState>,
+    headers: &HeaderMap,
+    uri: &str,
+    method: axum::http::Method,
+) -> ApiResult<Response> {
+    let mut proxy_req = state.client.request(method, uri);
 
     for (name, value) in headers {
         if name != axum::http::header::HOST {
