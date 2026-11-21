@@ -309,6 +309,7 @@ fn map_item(i: &pb::InboxItem) -> Value {
         "fallback_text": i.fallback_text,
         "link": i.link,
         "actor_user_id": i.actor_user_id,
+        "actor_name": i.actor_name,
         "org_id": i.org_id,
         "budget_id": i.budget_id,
         "group_count": i.group_count,
@@ -364,6 +365,7 @@ fn map_broadcast(b: &pb::Broadcast) -> Value {
 struct InboxQuery {
     filter: Option<String>,
     kind: Option<String>,
+    category: Option<String>,
     cursor: Option<String>,
     limit: Option<i32>,
     locale: Option<String>,
@@ -481,6 +483,10 @@ async fn list_inbox(
         None | Some("") => pb::NotificationKind::Unspecified as i32,
         Some(s) => kind_parse(s).ok_or_else(|| bad_request("invalid kind"))?,
     };
+    let category = match q.category.as_deref() {
+        None | Some("") => pb::NotificationCategory::Unspecified as i32,
+        Some(s) => category_parse(s).ok_or_else(|| bad_request("invalid category"))?,
+    };
     let mut c = client(&state).await?;
     let resp = c
         .list_inbox(with_user(
@@ -492,6 +498,7 @@ async fn list_inbox(
                 cursor: q.cursor.unwrap_or_default(),
                 limit: q.limit.unwrap_or(0),
                 locale: q.locale.unwrap_or_default(),
+                category,
             },
         )?)
         .await
